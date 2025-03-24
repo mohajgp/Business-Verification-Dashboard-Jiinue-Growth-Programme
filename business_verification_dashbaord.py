@@ -44,8 +44,7 @@ def load_data(url):
             'Elgeyo-Marakwet': 'Elgeyo Marakwet',
             'Trans-Nzoia': 'Trans Nzoia',
             'Taita-Taveta': 'Taita Taveta',
-            'Homa Bay': 'Homa Bay',  # just for reference
-            # Add more mappings as needed...
+            # Add more mappings if needed
         }
 
         # Standardize county names
@@ -104,13 +103,9 @@ def load_data(url):
 # -------------------- LOAD DATA --------------------
 df_raw, df_clean = load_data(SHEET_CSV_URL)
 
-# Optional debug to check unique counties in the data
-# st.write("Unique counties in raw data:", sorted(df_raw['County'].unique()))
-
-# -------------------- SIDEBAR FILTERS (ENHANCED UX) --------------------
+# -------------------- SIDEBAR FILTERS --------------------
 st.sidebar.header("📅 Filter Submissions")
 
-# Validate min & max dates from data
 min_date = df_raw['Timestamp'].min()
 max_date = df_raw['Timestamp'].max()
 
@@ -118,26 +113,21 @@ if pd.isna(min_date) or pd.isna(max_date):
     st.sidebar.warning("⚠️ No valid timestamp data available!")
     st.stop()
 
-# Display the earliest and latest dates
 st.sidebar.markdown(f"🗓️ **Earliest Submission**: `{min_date.date()}`")
 st.sidebar.markdown(f"🗓️ **Latest Submission**: `{max_date.date()}`")
 
-# Date input with min/max limits
 date_range = st.sidebar.date_input(
     "Select Date Range:",
     value=(min_date.date(), max_date.date()),
     min_value=min_date.date(),
-    max_value=max_date.date(),
-    help="Select a date range where submissions exist."
+    max_value=max_date.date()
 )
 
-# Gracefully handle single date vs range
 if isinstance(date_range, tuple) and len(date_range) == 2:
     start_date, end_date = date_range
 else:
     start_date = end_date = date_range
 
-# County Filter
 counties = df_raw['County'].dropna().unique()
 selected_counties = st.sidebar.multiselect(
     "Select Counties",
@@ -145,7 +135,6 @@ selected_counties = st.sidebar.multiselect(
     default=sorted(counties)
 )
 
-# Reset Filters Button
 if st.sidebar.button("🔄 Reset Filters"):
     st.experimental_rerun()
 
@@ -174,21 +163,37 @@ col1.metric("✅ Total Submissions (ALL)", f"{total_responses:,}")
 col2.metric("📊 Filtered Submissions", f"{filtered_submissions:,}")
 col3.metric("📍 Counties Covered", counties_covered)
 
-# -------------------- COUNTIES WITHOUT SUBMISSIONS --------------------
-st.subheader("🚫 Counties Without Submissions")
+# -------------------- MARCH & WEEKLY SUBMISSION STATS --------------------
+st.subheader("📅 March and Weekly Submissions Analysis")
 
-# Counties with submissions from the filtered dataset
+march_mask = (df_raw['Timestamp'].dt.month == 3) & (df_raw['Timestamp'].dt.year == 2024)
+df_march = df_raw[march_mask]
+counties_in_march = df_march['County'].dropna().unique().tolist()
+counties_with_no_march_submissions = sorted(list(set(ALL_COUNTIES) - set(counties_in_march)))
+
+st.markdown(f"**🚫 Counties with NO submissions in March 2024:** `{counties_with_no_march_submissions}`")
+
+# 17-24 March week
+start_week = datetime(2024, 3, 17).date()
+end_week = datetime(2024, 3, 24).date()
+
+week_mask = (df_raw['Timestamp'].dt.date >= start_week) & (df_raw['Timestamp'].dt.date <= end_week)
+df_week = df_raw[week_mask]
+counties_in_week = df_week['County'].dropna().unique().tolist()
+counties_with_no_week_submissions = sorted(list(set(ALL_COUNTIES) - set(counties_in_week)))
+
+st.markdown(f"**🚫 Counties with NO submissions during 17-24 March:** `{counties_with_no_week_submissions}`")
+
+# -------------------- COUNTIES WITHOUT SUBMISSIONS (FILTERED DATASET) --------------------
+st.subheader("🚫 Counties Without Submissions (Filtered View)")
+
 counties_with_submissions = filtered_raw['County'].dropna().unique().tolist()
-
-# Find counties without submissions
 counties_without_submissions = sorted(list(set(ALL_COUNTIES) - set(counties_with_submissions)))
 
-# Display the counties
 if counties_without_submissions:
     st.error(f"These counties have **NO submissions** for the selected filters:")
     st.write(counties_without_submissions)
 
-    # Optional: download button for counties without submissions
     counties_no_work_df = pd.DataFrame({"Counties Without Submissions": counties_without_submissions})
 
     st.download_button(
