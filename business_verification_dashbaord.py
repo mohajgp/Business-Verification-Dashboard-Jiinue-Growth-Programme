@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
+from datetime import datetime, timedelta
 from openlocationcode import openlocationcode as olc  # pip install openlocationcode
 
 # -------------------- PAGE CONFIG --------------------
@@ -24,43 +24,28 @@ def load_data(url):
         df_raw = pd.read_csv(url)
         df_raw.columns = df_raw.columns.str.strip()
 
-        # Clean Timestamp and County
+        # Clean columns
         df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
-        df_raw['County'] = (
-            df_raw['County']
-            .astype(str)
-            .str.strip()
-            .str.title()
-            .str.replace("’", "'")
-        )
+        df_raw['County'] = df_raw['County'].astype(str).str.strip().str.title()
 
-        # Clean Geo Coordinates
+        # Create clean copy with coordinates
         df_clean = df_raw.dropna(subset=['Geo-Coordinates']).copy()
 
-        latitudes = []
-        longitudes = []
-
-        # Loop through each row & check whether it's lat/long or plus code
+        latitudes, longitudes = [], []
         for coord in df_clean['Geo-Coordinates']:
             coord = coord.strip()
-
             if ',' in coord:
-                # Already lat,long
                 parts = coord.split(',')
                 try:
-                    lat = float(parts[0])
-                    lon = float(parts[1])
+                    lat, lon = float(parts[0]), float(parts[1])
                 except ValueError:
                     lat, lon = None, None
             else:
-                # Plus Code
                 try:
                     decoded = olc.decode(coord)
-                    lat = decoded.latitudeCenter
-                    lon = decoded.longitudeCenter
+                    lat, lon = decoded.latitudeCenter, decoded.longitudeCenter
                 except Exception:
                     lat, lon = None, None
-
             latitudes.append(lat)
             longitudes.append(lon)
 
@@ -68,7 +53,7 @@ def load_data(url):
         df_clean['Longitude'] = longitudes
         df_clean = df_clean.dropna(subset=['Latitude', 'Longitude'])
 
-        # Validate coordinates (Kenya region)
+        # Kenya coordinate validation
         df_clean = df_clean[
             (df_clean['Latitude'] >= -5) & (df_clean['Latitude'] <= 5) &
             (df_clean['Longitude'] >= 33) & (df_clean['Longitude'] <= 42)
@@ -96,11 +81,10 @@ date_range = st.sidebar.date_input(
     "Select Date Range:",
     value=(min_date.date(), max_date.date()),
     min_value=min_date.date(),
-    max_value=max_date.date(),
-    help="Select a date range where submissions exist."
+    max_value=max_date.date()
 )
 
-if isinstance(date_range, tuple) and len(date_range) == 2:
+if isinstance(date_range, tuple):
     start_date, end_date = date_range
 else:
     start_date = end_date = date_range
@@ -115,7 +99,7 @@ selected_counties = st.sidebar.multiselect(
 if st.sidebar.button("🔄 Reset Filters"):
     st.experimental_rerun()
 
-# -------------------- FILTER DATA --------------------
+# -------------------- APPLY FILTERS --------------------
 filtered_raw = df_raw[
     (df_raw['Timestamp'].dt.date >= start_date) &
     (df_raw['Timestamp'].dt.date <= end_date) &
@@ -140,7 +124,7 @@ col1.metric("✅ Total Submissions (ALL)", f"{total_responses:,}")
 col2.metric("📊 Filtered Submissions", f"{filtered_submissions:,}")
 col3.metric("📍 Counties Covered", counties_covered)
 
-# -------------------- MAP --------------------
+# -------------------- MAP OF VERIFIED BUSINESS LOCATIONS --------------------
 st.subheader("🗺️ Verified Business Locations Map")
 
 if not filtered_clean.empty:
@@ -166,50 +150,6 @@ if not filtered_clean.empty:
 else:
     st.warning("⚠️ No geocoded data available for the selected filters.")
 
-# -------------------- PER COUNTY STATS --------------------
-st.subheader("📋 Submissions Per County - Weekly and March")
-
-# Define weekly & monthly frames
-today = pd.Timestamp.now().normalize()
-week_start = today - pd.to_timedelta(today.weekday(), unit='D')
-
-weekly_df = df_raw[df_raw['Timestamp'].dt.date >= week_start.date()]
-march_df = df_raw[df_raw['Timestamp'].dt.month == 3]
-
-# Group by county
-weekly_counts = weekly_df.groupby('County').size().reset_index(name='Weekly Submissions')
-march_counts = march_df.groupby('County').size().reset_index(name='March Submissions')
-
-# Merge stats
-county_stats = pd.DataFrame({'County': sorted(df_raw['County'].dropna().unique())})
-county_stats = county_stats.merge(weekly_counts, on='County', how='left')
-county_stats = county_stats.merge(march_counts, on='County', how='left')
-
-# Fill NaN with 0
-county_stats[['Weekly Submissions', 'March Submissions']] = county_stats[['Weekly Submissions', 'March Submissions']].fillna(0).astype(int)
-
-# Display table
-st.dataframe(county_stats, use_container_width=True)
-
-# -------------------- NO SUBMISSIONS --------------------
-st.subheader("🚫 Counties With NO Submissions (Week and March)")
-
-all_counties = sorted(df_raw['County'].dropna().unique())
-
-march_submitted_counties = march_df['County'].dropna().unique().tolist()
-weekly_submitted_counties = weekly_df['County'].dropna().unique().tolist()
-
-march_no_submissions = sorted([county for county in all_counties if county not in march_submitted_counties])
-weekly_no_submissions = sorted([county for county in all_counties if county not in weekly_submitted_counties])
-
-col1, col2 = st.columns(2)
-with col1:
-    st.warning("📆 No Submissions in March:")
-    st.write(march_no_submissions if march_no_submissions else "✅ All counties submitted!")
-with col2:
-    st.warning("📅 No Submissions This Week:")
-    st.write(weekly_no_submissions if weekly_no_submissions else "✅ All counties submitted!")
-
 # -------------------- DATA TABLE --------------------
 st.subheader("📄 Filtered Data Table (All Submissions)")
 
@@ -225,12 +165,73 @@ def convert_df_to_csv(df):
 
 if not filtered_raw.empty:
     csv_data = convert_df_to_csv(filtered_raw)
-
     st.download_button(
         label="📥 Download Filtered Data as CSV",
         data=csv_data,
         file_name=f"Business_Verifications_{datetime.now().strftime('%Y-%m-%d')}.csv",
         mime='text/csv'
     )
+
+# -------------------- PER COUNTY WEEKLY & MARCH STATS --------------------
+st.subheader("🗓️ County Submission Stats - This Week and March")
+
+# Clean counties again
+df_raw['County'] = df_raw['County'].astype(str).str.strip().str.title()
+
+# Define time periods
+today = datetime.now()
+week_start = today - timedelta(days=today.weekday())  # Monday this week
+march_df = df_raw[df_raw['Timestamp'].dt.month == 3]
+week_df = df_raw[df_raw['Timestamp'].dt.date >= week_start.date()]
+
+# Get unique counties in data
+all_counties = sorted(df_raw['County'].dropna().unique())
+
+# Prepare counts
+week_counts = week_df['County'].value_counts().reindex(all_counties, fill_value=0)
+march_counts = march_df['County'].value_counts().reindex(all_counties, fill_value=0)
+
+# Display stats
+week_stats = pd.DataFrame({
+    'County': all_counties,
+    'Submissions This Week': week_counts.values
+})
+
+march_stats = pd.DataFrame({
+    'County': all_counties,
+    'Submissions in March': march_counts.values
+})
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("### 📅 Weekly Submissions")
+    st.dataframe(week_stats)
+
+with col2:
+    st.markdown("### 📆 March Submissions")
+    st.dataframe(march_stats)
+
+# -------------------- COUNTIES WITH NO SUBMISSIONS --------------------
+weekly_no_subs = week_stats[week_stats['Submissions This Week'] == 0]['County'].tolist()
+march_no_subs = march_stats[march_stats['Submissions in March'] == 0]['County'].tolist()
+
+st.subheader("🚫 Counties With NO Submissions (Week and March)")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.warning("📅 No Submissions This Week:")
+    if weekly_no_subs:
+        st.write(weekly_no_subs)
+    else:
+        st.success("✅ All counties submitted this week!")
+
+with col2:
+    st.warning("📆 No Submissions in March:")
+    if march_no_subs:
+        st.write(march_no_subs)
+    else:
+        st.success("✅ All counties submitted in March!")
 
 st.success("✅ Dashboard updated in real-time!")
