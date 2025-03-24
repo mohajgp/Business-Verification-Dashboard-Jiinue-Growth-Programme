@@ -17,7 +17,7 @@ st.caption("Real-time view of business verifications by field officers")
 # -------------------- SETTINGS --------------------
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
 
-# Full list of counties in Kenya (standardized)
+# Full list of counties in Kenya
 ALL_COUNTIES = [
     'Mombasa', 'Kwale', 'Kilifi', 'Tana River', 'Lamu', 'Taita Taveta', 'Garissa', 'Wajir',
     'Mandera', 'Marsabit', 'Isiolo', 'Meru', 'Tharaka-Nithi', 'Embu', 'Kitui', 'Machakos',
@@ -36,24 +36,7 @@ def load_data(url):
         df_raw.columns = df_raw.columns.str.strip()
 
         df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
-        
-        # Clean county names and fix known issues
-        county_mapping = {
-            'Tharaka Nithi': 'Tharaka-Nithi',
-            'Muranga': "Murang'a",
-            'Elgeyo-Marakwet': 'Elgeyo Marakwet',
-            'Trans-Nzoia': 'Trans Nzoia',
-            'Taita-Taveta': 'Taita Taveta',
-            # Add more mappings if needed
-        }
-
-        # Standardize county names
-        df_raw['County'] = (
-            df_raw['County']
-            .str.strip()
-            .str.title()
-            .replace(county_mapping)
-        )
+        df_raw['County'] = df_raw['County'].str.strip().str.title()
 
         # Create clean copy with coordinates
         df_clean = df_raw.dropna(subset=['Geo-Coordinates']).copy()
@@ -66,7 +49,6 @@ def load_data(url):
             coord = coord.strip()
 
             if ',' in coord:
-                # Already lat,long
                 parts = coord.split(',')
                 try:
                     lat = float(parts[0])
@@ -74,7 +56,6 @@ def load_data(url):
                 except ValueError:
                     lat, lon = None, None
             else:
-                # Plus Code
                 try:
                     decoded = olc.decode(coord)
                     lat = decoded.latitudeCenter
@@ -85,14 +66,11 @@ def load_data(url):
             latitudes.append(lat)
             longitudes.append(lon)
 
-        # Append lat/lon columns
         df_clean['Latitude'] = latitudes
         df_clean['Longitude'] = longitudes
 
-        # Drop rows without valid lat/long
         df_clean = df_clean.dropna(subset=['Latitude', 'Longitude'])
 
-        # Validate coordinates (Kenya region basic check)
         df_clean = df_clean[
             (df_clean['Latitude'] >= -5) & (df_clean['Latitude'] <= 5) &
             (df_clean['Longitude'] >= 33) & (df_clean['Longitude'] <= 42)
@@ -120,7 +98,8 @@ date_range = st.sidebar.date_input(
     "Select Date Range:",
     value=(min_date.date(), max_date.date()),
     min_value=min_date.date(),
-    max_value=max_date.date()
+    max_value=max_date.date(),
+    help="Select a date range where submissions exist."
 )
 
 if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -163,35 +142,15 @@ col1.metric("✅ Total Submissions (ALL)", f"{total_responses:,}")
 col2.metric("📊 Filtered Submissions", f"{filtered_submissions:,}")
 col3.metric("📍 Counties Covered", counties_covered)
 
-# -------------------- MARCH & WEEKLY SUBMISSION STATS --------------------
-st.subheader("📅 March and Weekly Submissions Analysis")
-
-march_mask = (df_raw['Timestamp'].dt.month == 3) & (df_raw['Timestamp'].dt.year == 2024)
-df_march = df_raw[march_mask]
-counties_in_march = df_march['County'].dropna().unique().tolist()
-counties_with_no_march_submissions = sorted(list(set(ALL_COUNTIES) - set(counties_in_march)))
-
-st.markdown(f"**🚫 Counties with NO submissions in March 2024:** `{counties_with_no_march_submissions}`")
-
-# 17-24 March week
-start_week = datetime(2024, 3, 17).date()
-end_week = datetime(2024, 3, 24).date()
-
-week_mask = (df_raw['Timestamp'].dt.date >= start_week) & (df_raw['Timestamp'].dt.date <= end_week)
-df_week = df_raw[week_mask]
-counties_in_week = df_week['County'].dropna().unique().tolist()
-counties_with_no_week_submissions = sorted(list(set(ALL_COUNTIES) - set(counties_in_week)))
-
-st.markdown(f"**🚫 Counties with NO submissions during 17-24 March:** `{counties_with_no_week_submissions}`")
-
-# -------------------- COUNTIES WITHOUT SUBMISSIONS (FILTERED DATASET) --------------------
-st.subheader("🚫 Counties Without Submissions (Filtered View)")
+# -------------------- COUNTIES WITHOUT SUBMISSIONS --------------------
+st.subheader("🚫 Counties Without Submissions")
 
 counties_with_submissions = filtered_raw['County'].dropna().unique().tolist()
+
 counties_without_submissions = sorted(list(set(ALL_COUNTIES) - set(counties_with_submissions)))
 
 if counties_without_submissions:
-    st.error(f"These counties have **NO submissions** for the selected filters:")
+    st.error(f"These counties have **NO submissions** for the selected filters ({len(counties_without_submissions)} counties):")
     st.write(counties_without_submissions)
 
     counties_no_work_df = pd.DataFrame({"Counties Without Submissions": counties_without_submissions})
@@ -205,6 +164,40 @@ if counties_without_submissions:
 else:
     st.success("🎉 All counties have submissions for the selected filters!")
 
+# -------------------- MARCH & WEEKLY SUBMISSION STATS WITH COUNTS --------------------
+st.subheader("📅 March and Weekly Submissions Analysis (with Submission Counts)")
+
+# === MARCH SUBMISSIONS ===
+march_mask = (df_raw['Timestamp'].dt.month == 3) & (df_raw['Timestamp'].dt.year == 2024)
+df_march = df_raw[march_mask]
+
+march_counts = df_march.groupby('County').size().reindex(ALL_COUNTIES, fill_value=0).reset_index()
+march_counts.columns = ['County', 'March Submissions']
+
+counties_with_no_march_submissions = march_counts[march_counts['March Submissions'] == 0]['County'].tolist()
+
+st.markdown(f"🚫 **Counties with NO submissions in March 2024 ({len(counties_with_no_march_submissions)} counties):** `{counties_with_no_march_submissions}`")
+
+st.markdown("✅ **March 2024 Submission Counts by County:**")
+st.dataframe(march_counts)
+
+# === 17-24 MARCH SUBMISSIONS ===
+start_week = datetime(2024, 3, 17).date()
+end_week = datetime(2024, 3, 24).date()
+
+week_mask = (df_raw['Timestamp'].dt.date >= start_week) & (df_raw['Timestamp'].dt.date <= end_week)
+df_week = df_raw[week_mask]
+
+week_counts = df_week.groupby('County').size().reindex(ALL_COUNTIES, fill_value=0).reset_index()
+week_counts.columns = ['County', '17-24 March Submissions']
+
+counties_with_no_week_submissions = week_counts[week_counts['17-24 March Submissions'] == 0]['County'].tolist()
+
+st.markdown(f"🚫 **Counties with NO submissions during 17-24 March ({len(counties_with_no_week_submissions)} counties):** `{counties_with_no_week_submissions}`")
+
+st.markdown("✅ **17-24 March Submission Counts by County:**")
+st.dataframe(week_counts)
+
 # -------------------- MAP OF VERIFIED BUSINESS LOCATIONS --------------------
 st.subheader("🗺️ Verified Business Locations Map")
 
@@ -216,8 +209,8 @@ if not filtered_clean.empty:
         color="County",
         hover_name="Name of the Participant" if 'Name of the Participant' in df_raw.columns else None,
         hover_data={
-            "Verified Phone Number": True if 'Verified Phone Number' in df_raw.columns else False,
-            "Verified ID Number": True if 'Verified ID Number' in df_raw.columns else False,
+            "Verified Phone Number": True,
+            "Verified ID Number": True,
             "Latitude": False,
             "Longitude": False
         },
