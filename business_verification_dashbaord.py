@@ -29,22 +29,24 @@ ALL_COUNTIES = [
 ]
 
 # -------------------- FUNCTION TO LOAD DATA --------------------
+# -------------------- FUNCTION TO LOAD DATA --------------------
 @st.cache_data(ttl=300)
 def load_data(url):
     with st.spinner("Loading data..."):
         df_raw = pd.read_csv(url)
         df_raw.columns = df_raw.columns.str.strip()
 
-        df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
+        # ✅ Fix Timestamp parsing
+        df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], dayfirst=True, errors='coerce')
+        
         df_raw['County'] = df_raw['County'].str.strip().str.title()
 
-        # Create clean copy with coordinates
+        # Process geolocation data
         df_clean = df_raw.dropna(subset=['Geo-Coordinates']).copy()
 
         latitudes = []
         longitudes = []
 
-        # Loop through each row & check whether it's lat/long or plus code
         for coord in df_clean['Geo-Coordinates']:
             coord = coord.strip()
 
@@ -77,6 +79,7 @@ def load_data(url):
         ]
 
     return df_raw, df_clean
+
 
 # -------------------- LOAD DATA --------------------
 df_raw, df_clean = load_data(SHEET_CSV_URL)
