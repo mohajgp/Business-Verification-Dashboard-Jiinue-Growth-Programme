@@ -17,11 +17,11 @@ st.caption("Real-time view of business verifications by field officers")
 # -------------------- SETTINGS --------------------
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
 
-# Full list of counties in Kenya
+# Full list of counties in Kenya (standardized)
 ALL_COUNTIES = [
     'Mombasa', 'Kwale', 'Kilifi', 'Tana River', 'Lamu', 'Taita Taveta', 'Garissa', 'Wajir',
     'Mandera', 'Marsabit', 'Isiolo', 'Meru', 'Tharaka-Nithi', 'Embu', 'Kitui', 'Machakos',
-    'Makueni', 'Nyandarua', 'Nyeri', 'Kirinyaga', 'Murang\'a', 'Kiambu', 'Turkana',
+    'Makueni', 'Nyandarua', 'Nyeri', 'Kirinyaga', "Murang'a", 'Kiambu', 'Turkana',
     'West Pokot', 'Samburu', 'Trans Nzoia', 'Uasin Gishu', 'Elgeyo Marakwet', 'Nandi',
     'Baringo', 'Laikipia', 'Nakuru', 'Narok', 'Kajiado', 'Kericho', 'Bomet', 'Kakamega',
     'Vihiga', 'Bungoma', 'Busia', 'Siaya', 'Kisumu', 'Homa Bay', 'Migori', 'Kisii', 'Nyamira',
@@ -36,7 +36,25 @@ def load_data(url):
         df_raw.columns = df_raw.columns.str.strip()
 
         df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
-        df_raw['County'] = df_raw['County'].str.strip().str.title()
+        
+        # Clean county names and fix known issues
+        county_mapping = {
+            'Tharaka Nithi': 'Tharaka-Nithi',
+            'Muranga': "Murang'a",
+            'Elgeyo-Marakwet': 'Elgeyo Marakwet',
+            'Trans-Nzoia': 'Trans Nzoia',
+            'Taita-Taveta': 'Taita Taveta',
+            'Homa Bay': 'Homa Bay',  # just for reference
+            # Add more mappings as needed...
+        }
+
+        # Standardize county names
+        df_raw['County'] = (
+            df_raw['County']
+            .str.strip()
+            .str.title()
+            .replace(county_mapping)
+        )
 
         # Create clean copy with coordinates
         df_clean = df_raw.dropna(subset=['Geo-Coordinates']).copy()
@@ -44,10 +62,12 @@ def load_data(url):
         latitudes = []
         longitudes = []
 
+        # Loop through each row & check whether it's lat/long or plus code
         for coord in df_clean['Geo-Coordinates']:
             coord = coord.strip()
 
             if ',' in coord:
+                # Already lat,long
                 parts = coord.split(',')
                 try:
                     lat = float(parts[0])
@@ -55,6 +75,7 @@ def load_data(url):
                 except ValueError:
                     lat, lon = None, None
             else:
+                # Plus Code
                 try:
                     decoded = olc.decode(coord)
                     lat = decoded.latitudeCenter
@@ -65,11 +86,14 @@ def load_data(url):
             latitudes.append(lat)
             longitudes.append(lon)
 
+        # Append lat/lon columns
         df_clean['Latitude'] = latitudes
         df_clean['Longitude'] = longitudes
 
+        # Drop rows without valid lat/long
         df_clean = df_clean.dropna(subset=['Latitude', 'Longitude'])
 
+        # Validate coordinates (Kenya region basic check)
         df_clean = df_clean[
             (df_clean['Latitude'] >= -5) & (df_clean['Latitude'] <= 5) &
             (df_clean['Longitude'] >= 33) & (df_clean['Longitude'] <= 42)
@@ -80,9 +104,13 @@ def load_data(url):
 # -------------------- LOAD DATA --------------------
 df_raw, df_clean = load_data(SHEET_CSV_URL)
 
-# -------------------- SIDEBAR FILTERS --------------------
+# Optional debug to check unique counties in the data
+# st.write("Unique counties in raw data:", sorted(df_raw['County'].unique()))
+
+# -------------------- SIDEBAR FILTERS (ENHANCED UX) --------------------
 st.sidebar.header("📅 Filter Submissions")
 
+# Validate min & max dates from data
 min_date = df_raw['Timestamp'].min()
 max_date = df_raw['Timestamp'].max()
 
@@ -90,9 +118,11 @@ if pd.isna(min_date) or pd.isna(max_date):
     st.sidebar.warning("⚠️ No valid timestamp data available!")
     st.stop()
 
+# Display the earliest and latest dates
 st.sidebar.markdown(f"🗓️ **Earliest Submission**: `{min_date.date()}`")
 st.sidebar.markdown(f"🗓️ **Latest Submission**: `{max_date.date()}`")
 
+# Date input with min/max limits
 date_range = st.sidebar.date_input(
     "Select Date Range:",
     value=(min_date.date(), max_date.date()),
@@ -101,11 +131,13 @@ date_range = st.sidebar.date_input(
     help="Select a date range where submissions exist."
 )
 
+# Gracefully handle single date vs range
 if isinstance(date_range, tuple) and len(date_range) == 2:
     start_date, end_date = date_range
 else:
     start_date = end_date = date_range
 
+# County Filter
 counties = df_raw['County'].dropna().unique()
 selected_counties = st.sidebar.multiselect(
     "Select Counties",
@@ -113,6 +145,7 @@ selected_counties = st.sidebar.multiselect(
     default=sorted(counties)
 )
 
+# Reset Filters Button
 if st.sidebar.button("🔄 Reset Filters"):
     st.experimental_rerun()
 
@@ -144,14 +177,18 @@ col3.metric("📍 Counties Covered", counties_covered)
 # -------------------- COUNTIES WITHOUT SUBMISSIONS --------------------
 st.subheader("🚫 Counties Without Submissions")
 
+# Counties with submissions from the filtered dataset
 counties_with_submissions = filtered_raw['County'].dropna().unique().tolist()
 
+# Find counties without submissions
 counties_without_submissions = sorted(list(set(ALL_COUNTIES) - set(counties_with_submissions)))
 
+# Display the counties
 if counties_without_submissions:
     st.error(f"These counties have **NO submissions** for the selected filters:")
     st.write(counties_without_submissions)
 
+    # Optional: download button for counties without submissions
     counties_no_work_df = pd.DataFrame({"Counties Without Submissions": counties_without_submissions})
 
     st.download_button(
@@ -174,8 +211,8 @@ if not filtered_clean.empty:
         color="County",
         hover_name="Name of the Participant" if 'Name of the Participant' in df_raw.columns else None,
         hover_data={
-            "Verified Phone Number": True,
-            "Verified ID Number": True,
+            "Verified Phone Number": True if 'Verified Phone Number' in df_raw.columns else False,
+            "Verified ID Number": True if 'Verified ID Number' in df_raw.columns else False,
             "Latitude": False,
             "Longitude": False
         },
@@ -197,6 +234,7 @@ if not filtered_raw.empty:
 else:
     st.info("ℹ️ No submissions found for the selected filters.")
 
+# -------------------- DOWNLOAD BUTTON --------------------
 @st.cache_data
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
@@ -210,59 +248,5 @@ if not filtered_raw.empty:
         file_name=f"Business_Verifications_{datetime.now().strftime('%Y-%m-%d')}.csv",
         mime='text/csv'
     )
-
-# -------------------- COUNTY STATISTICS FOR MARCH AND WEEK --------------------
-st.subheader("📊 County Submission Stats (March 2025 & Week 17-24 March)")
-
-march_start = datetime(2025, 3, 1).date()
-march_end = datetime(2025, 3, 31).date()
-
-week_start = datetime(2025, 3, 17).date()
-week_end = datetime(2025, 3, 24).date()
-
-march_data = df_raw[
-    (df_raw['Timestamp'].dt.date >= march_start) &
-    (df_raw['Timestamp'].dt.date <= march_end)
-]
-
-week_data = df_raw[
-    (df_raw['Timestamp'].dt.date >= week_start) &
-    (df_raw['Timestamp'].dt.date <= week_end)
-]
-
-march_counties = march_data.groupby('County').size().reset_index(name='March Submissions')
-week_counties = week_data.groupby('County').size().reset_index(name='Week Submissions (17-24 March)')
-
-combined_stats = pd.merge(
-    pd.DataFrame({'County': ALL_COUNTIES}),
-    march_counties,
-    on='County',
-    how='left'
-).merge(
-    week_counties,
-    on='County',
-    how='left'
-)
-
-combined_stats[['March Submissions', 'Week Submissions (17-24 March)']] = combined_stats[['March Submissions', 'Week Submissions (17-24 March)']].fillna(0).astype(int)
-
-st.dataframe(combined_stats)
-
-no_sub_march = combined_stats[combined_stats['March Submissions'] == 0]['County'].tolist()
-no_sub_week = combined_stats[combined_stats['Week Submissions (17-24 March)'] == 0]['County'].tolist()
-
-if no_sub_march:
-    st.warning(f"🚫 Counties with **NO submissions in March**: {no_sub_march}")
-
-if no_sub_week:
-    st.warning(f"🚫 Counties with **NO submissions during 17-24 March**: {no_sub_week}")
-
-csv_stats = combined_stats.to_csv(index=False).encode('utf-8')
-st.download_button(
-    label="📥 Download County Submission Stats",
-    data=csv_stats,
-    file_name="County_Submission_Stats_March_2025.csv",
-    mime='text/csv'
-)
 
 st.success("✅ Dashboard updated in real-time!")
