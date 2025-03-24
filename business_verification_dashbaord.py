@@ -17,6 +17,17 @@ st.caption("Real-time view of business verifications by field officers")
 # -------------------- SETTINGS --------------------
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
 
+# Full list of counties in Kenya
+ALL_COUNTIES = [
+    'Mombasa', 'Kwale', 'Kilifi', 'Tana River', 'Lamu', 'Taita Taveta', 'Garissa', 'Wajir',
+    'Mandera', 'Marsabit', 'Isiolo', 'Meru', 'Tharaka-Nithi', 'Embu', 'Kitui', 'Machakos',
+    'Makueni', 'Nyandarua', 'Nyeri', 'Kirinyaga', 'Murang\'a', 'Kiambu', 'Turkana',
+    'West Pokot', 'Samburu', 'Trans Nzoia', 'Uasin Gishu', 'Elgeyo Marakwet', 'Nandi',
+    'Baringo', 'Laikipia', 'Nakuru', 'Narok', 'Kajiado', 'Kericho', 'Bomet', 'Kakamega',
+    'Vihiga', 'Bungoma', 'Busia', 'Siaya', 'Kisumu', 'Homa Bay', 'Migori', 'Kisii', 'Nyamira',
+    'Nairobi'
+]
+
 # -------------------- FUNCTION TO LOAD DATA --------------------
 @st.cache_data(ttl=300)
 def load_data(url):
@@ -141,6 +152,32 @@ col1, col2, col3 = st.columns(3)
 col1.metric("✅ Total Submissions (ALL)", f"{total_responses:,}")
 col2.metric("📊 Filtered Submissions", f"{filtered_submissions:,}")
 col3.metric("📍 Counties Covered", counties_covered)
+
+# -------------------- COUNTIES WITHOUT SUBMISSIONS --------------------
+st.subheader("🚫 Counties Without Submissions")
+
+# Counties with submissions from the filtered dataset
+counties_with_submissions = filtered_raw['County'].dropna().unique().tolist()
+
+# Find counties without submissions
+counties_without_submissions = sorted(list(set(ALL_COUNTIES) - set(counties_with_submissions)))
+
+# Display the counties
+if counties_without_submissions:
+    st.error(f"These counties have **NO submissions** for the selected filters:")
+    st.write(counties_without_submissions)
+
+    # Optional: download button for counties without submissions
+    counties_no_work_df = pd.DataFrame({"Counties Without Submissions": counties_without_submissions})
+
+    st.download_button(
+        label="📥 Download No Submission Counties (CSV)",
+        data=counties_no_work_df.to_csv(index=False).encode('utf-8'),
+        file_name=f"No_Submissions_Counties_{datetime.now().strftime('%Y-%m-%d')}.csv",
+        mime='text/csv'
+    )
+else:
+    st.success("🎉 All counties have submissions for the selected filters!")
 
 # -------------------- MAP OF VERIFIED BUSINESS LOCATIONS --------------------
 st.subheader("🗺️ Verified Business Locations Map")
