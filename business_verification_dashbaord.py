@@ -24,19 +24,28 @@ def load_data(url):
         df_raw = pd.read_csv(url)
         df_raw.columns = df_raw.columns.str.strip()
 
+        # Clean Timestamp and County
         df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
-        df_raw['County'] = df_raw['County'].str.strip().str.title()
+        df_raw['County'] = (
+            df_raw['County']
+            .astype(str)
+            .str.strip()
+            .str.title()
+            .str.replace("’", "'")
+        )
 
-        # Create clean copy with coordinates
+        # Clean Geo Coordinates
         df_clean = df_raw.dropna(subset=['Geo-Coordinates']).copy()
 
         latitudes = []
         longitudes = []
 
+        # Loop through each row & check whether it's lat/long or plus code
         for coord in df_clean['Geo-Coordinates']:
             coord = coord.strip()
 
             if ',' in coord:
+                # Already lat,long
                 parts = coord.split(',')
                 try:
                     lat = float(parts[0])
@@ -44,6 +53,7 @@ def load_data(url):
                 except ValueError:
                     lat, lon = None, None
             else:
+                # Plus Code
                 try:
                     decoded = olc.decode(coord)
                     lat = decoded.latitudeCenter
@@ -56,9 +66,9 @@ def load_data(url):
 
         df_clean['Latitude'] = latitudes
         df_clean['Longitude'] = longitudes
-
         df_clean = df_clean.dropna(subset=['Latitude', 'Longitude'])
 
+        # Validate coordinates (Kenya region)
         df_clean = df_clean[
             (df_clean['Latitude'] >= -5) & (df_clean['Latitude'] <= 5) &
             (df_clean['Longitude'] >= 33) & (df_clean['Longitude'] <= 42)
@@ -68,39 +78,6 @@ def load_data(url):
 
 # -------------------- LOAD DATA --------------------
 df_raw, df_clean = load_data(SHEET_CSV_URL)
-
-# -------------------- DATE RANGES --------------------
-march_start = datetime(2025, 3, 1)
-march_end = datetime(2025, 3, 31)
-
-week_start = datetime(2025, 3, 17)
-week_end = datetime(2025, 3, 23)
-
-# -------------------- MARCH & WEEK FILTERS --------------------
-march_df = df_raw[
-    (df_raw['Timestamp'] >= march_start) & (df_raw['Timestamp'] <= march_end)
-]
-
-weekly_df = df_raw[
-    (df_raw['Timestamp'] >= week_start) & (df_raw['Timestamp'] <= week_end)
-]
-
-# -------------------- COUNTIES WITH NO SUBMISSIONS --------------------
-all_counties = [
-    'Baringo', 'Bomet', 'Bungoma', 'Busia', 'Elgeyo Marakwet', 'Embu', 'Garissa',
-    'Homa Bay', 'Isiolo', 'Kajiado', 'Kakamega', 'Kericho', 'Kiambu', 'Kilifi',
-    'Kirinyaga', 'Kisii', 'Kisumu', 'Kitui', 'Kwale', 'Laikipia', 'Lamu', 'Machakos',
-    'Makueni', 'Mandera', 'Marsabit', 'Meru', 'Migori', 'Mombasa', "Murang'a",
-    'Nairobi', 'Nakuru', 'Nandi', 'Narok', 'Nyamira', 'Nyandarua', 'Nyeri',
-    'Samburu', 'Siaya', 'Taita Taveta', 'Tana River', 'Tharaka Nithi', 'Trans Nzoia',
-    'Turkana', 'Uasin Gishu', 'Vihiga', 'Wajir', 'West Pokot'
-]
-
-march_submitted_counties = march_df['County'].dropna().unique().tolist()
-weekly_submitted_counties = weekly_df['County'].dropna().unique().tolist()
-
-march_no_submissions = sorted([county for county in all_counties if county not in march_submitted_counties])
-weekly_no_submissions = sorted([county for county in all_counties if county not in weekly_submitted_counties])
 
 # -------------------- SIDEBAR FILTERS --------------------
 st.sidebar.header("📅 Filter Submissions")
@@ -138,7 +115,7 @@ selected_counties = st.sidebar.multiselect(
 if st.sidebar.button("🔄 Reset Filters"):
     st.experimental_rerun()
 
-# -------------------- APPLY FILTERS --------------------
+# -------------------- FILTER DATA --------------------
 filtered_raw = df_raw[
     (df_raw['Timestamp'].dt.date >= start_date) &
     (df_raw['Timestamp'].dt.date <= end_date) &
@@ -163,25 +140,7 @@ col1.metric("✅ Total Submissions (ALL)", f"{total_responses:,}")
 col2.metric("📊 Filtered Submissions", f"{filtered_submissions:,}")
 col3.metric("📍 Counties Covered", counties_covered)
 
-# -------------------- MARCH & WEEKLY SUMMARY --------------------
-st.subheader("📅 March 2025 & Week 17-23 March 2025 Summary")
-
-col4, col5, col6, col7 = st.columns(4)
-col4.metric("🗓️ March Submissions", f"{march_df.shape[0]:,}")
-col5.metric("🗓️ Week Submissions (17-23 March)", f"{weekly_df.shape[0]:,}")
-col6.metric("❌ Counties NO Submissions (March)", len(march_no_submissions))
-col7.metric("❌ Counties NO Submissions (Week)", len(weekly_no_submissions))
-
-with st.expander("See Counties with NO Submissions"):
-    col8, col9 = st.columns(2)
-    with col8:
-        st.markdown("### ❌ No Submissions - March 2025")
-        st.write(march_no_submissions if march_no_submissions else "✅ All counties submitted")
-    with col9:
-        st.markdown("### ❌ No Submissions - Week 17-23 March 2025")
-        st.write(weekly_no_submissions if weekly_no_submissions else "✅ All counties submitted")
-
-# -------------------- MAP OF VERIFIED BUSINESS LOCATIONS --------------------
+# -------------------- MAP --------------------
 st.subheader("🗺️ Verified Business Locations Map")
 
 if not filtered_clean.empty:
@@ -207,6 +166,50 @@ if not filtered_clean.empty:
 else:
     st.warning("⚠️ No geocoded data available for the selected filters.")
 
+# -------------------- PER COUNTY STATS --------------------
+st.subheader("📋 Submissions Per County - Weekly and March")
+
+# Define weekly & monthly frames
+today = pd.Timestamp.now().normalize()
+week_start = today - pd.to_timedelta(today.weekday(), unit='D')
+
+weekly_df = df_raw[df_raw['Timestamp'].dt.date >= week_start.date()]
+march_df = df_raw[df_raw['Timestamp'].dt.month == 3]
+
+# Group by county
+weekly_counts = weekly_df.groupby('County').size().reset_index(name='Weekly Submissions')
+march_counts = march_df.groupby('County').size().reset_index(name='March Submissions')
+
+# Merge stats
+county_stats = pd.DataFrame({'County': sorted(df_raw['County'].dropna().unique())})
+county_stats = county_stats.merge(weekly_counts, on='County', how='left')
+county_stats = county_stats.merge(march_counts, on='County', how='left')
+
+# Fill NaN with 0
+county_stats[['Weekly Submissions', 'March Submissions']] = county_stats[['Weekly Submissions', 'March Submissions']].fillna(0).astype(int)
+
+# Display table
+st.dataframe(county_stats, use_container_width=True)
+
+# -------------------- NO SUBMISSIONS --------------------
+st.subheader("🚫 Counties With NO Submissions (Week and March)")
+
+all_counties = sorted(df_raw['County'].dropna().unique())
+
+march_submitted_counties = march_df['County'].dropna().unique().tolist()
+weekly_submitted_counties = weekly_df['County'].dropna().unique().tolist()
+
+march_no_submissions = sorted([county for county in all_counties if county not in march_submitted_counties])
+weekly_no_submissions = sorted([county for county in all_counties if county not in weekly_submitted_counties])
+
+col1, col2 = st.columns(2)
+with col1:
+    st.warning("📆 No Submissions in March:")
+    st.write(march_no_submissions if march_no_submissions else "✅ All counties submitted!")
+with col2:
+    st.warning("📅 No Submissions This Week:")
+    st.write(weekly_no_submissions if weekly_no_submissions else "✅ All counties submitted!")
+
 # -------------------- DATA TABLE --------------------
 st.subheader("📄 Filtered Data Table (All Submissions)")
 
@@ -215,7 +218,7 @@ if not filtered_raw.empty:
 else:
     st.info("ℹ️ No submissions found for the selected filters.")
 
-# -------------------- DOWNLOAD BUTTONS --------------------
+# -------------------- DOWNLOAD BUTTON --------------------
 @st.cache_data
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
@@ -229,22 +232,5 @@ if not filtered_raw.empty:
         file_name=f"Business_Verifications_{datetime.now().strftime('%Y-%m-%d')}.csv",
         mime='text/csv'
     )
-
-march_csv = convert_df_to_csv(march_df)
-weekly_csv = convert_df_to_csv(weekly_df)
-
-st.download_button(
-    label="📥 Download March 2025 Submissions",
-    data=march_csv,
-    file_name=f"March_Submissions_{datetime.now().strftime('%Y-%m-%d')}.csv",
-    mime='text/csv'
-)
-
-st.download_button(
-    label="📥 Download Week 17-23 March Submissions",
-    data=weekly_csv,
-    file_name=f"Week_Submissions_{datetime.now().strftime('%Y-%m-%d')}.csv",
-    mime='text/csv'
-)
 
 st.success("✅ Dashboard updated in real-time!")
