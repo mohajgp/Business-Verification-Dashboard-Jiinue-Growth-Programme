@@ -2,16 +2,16 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# === CONFIG ===
+# CONFIG
 st.set_page_config(page_title="KNCCI Mentorship Submissions", layout="wide")
-
 st.title("📋 KNCCI Mentorship Submissions Dashboard")
 st.markdown("Analyze submissions for **March 2025** and **Week 17-23 March 2025**.")
 
-# === LOAD DATA ===
+# LOAD DATA
 sheet_id = '1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q'
-sheet_name = 'Form Responses 1'
-csv_url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}'
+gid = '1224059157'
+
+csv_url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}'
 
 @st.cache_data
 def load_data():
@@ -22,7 +22,7 @@ def load_data():
 
 df_raw = load_data()
 
-# === DATE FILTERS ===
+# FILTER DATES
 march_start = datetime(2025, 3, 1)
 march_end = datetime(2025, 3, 31)
 
@@ -32,7 +32,7 @@ week_end = datetime(2025, 3, 23)
 march_df = df_raw[(df_raw['Timestamp'] >= march_start) & (df_raw['Timestamp'] <= march_end)]
 weekly_df = df_raw[(df_raw['Timestamp'] >= week_start) & (df_raw['Timestamp'] <= week_end)]
 
-# === ALL COUNTIES ===
+# ALL COUNTIES
 all_counties = [
     'Baringo', 'Bomet', 'Bungoma', 'Busia', 'Elgeyo Marakwet', 'Embu', 'Garissa',
     'Homa Bay', 'Isiolo', 'Kajiado', 'Kakamega', 'Kericho', 'Kiambu', 'Kilifi',
@@ -52,7 +52,7 @@ weekly_no_submissions = sorted([county for county in all_counties if county not 
 march_counts = march_df['County'].value_counts().sort_index()
 weekly_counts = weekly_df['County'].value_counts().sort_index()
 
-# === DISPLAY ===
+# DISPLAY RESULTS
 st.header("🚫 Counties with NO Submissions")
 
 col1, col2 = st.columns(2)
@@ -67,7 +67,7 @@ with col2:
     st.write(weekly_no_submissions)
     st.metric("Count", len(weekly_no_submissions))
 
-# === SUBMISSION COUNTS ===
+# SUBMISSIONS COUNTS
 st.header("📊 Submissions Per County")
 
 col3, col4 = st.columns(2)
@@ -80,7 +80,7 @@ with col4:
     st.subheader("17-23 March 2025 Submissions")
     st.dataframe(weekly_counts)
 
-# === DOWNLOAD OPTION ===
+# DOWNLOAD OPTIONS
 st.header("⬇️ Download Reports")
 
 march_csv = march_df.to_csv(index=False).encode('utf-8')
@@ -89,5 +89,4 @@ weekly_csv = weekly_df.to_csv(index=False).encode('utf-8')
 st.download_button("Download March Submissions CSV", march_csv, "march_submissions.csv", "text/csv")
 st.download_button("Download Weekly Submissions CSV", weekly_csv, "weekly_submissions.csv", "text/csv")
 
-# === FOOTER ===
 st.caption("KNCCI Mentorship Dashboard • March 2025 Analysis")
