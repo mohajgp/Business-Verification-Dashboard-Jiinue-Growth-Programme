@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, date
+from datetime import datetime, timedelta
 
 # -------------------- PAGE CONFIG --------------------
 st.set_page_config(
@@ -23,8 +23,10 @@ def load_data(url):
         try:
             df_raw = pd.read_csv(url)
             df_raw.columns = df_raw.columns.str.strip()
-            df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
+
+            df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], format='%m/%d/%Y %H:%M:%S', errors='coerce')
             df_raw['County'] = df_raw['County'].str.strip().str.title()
+
             return df_raw
         except Exception as e:
             st.error(f"Error loading data: {e}")
@@ -38,23 +40,33 @@ if df_raw.empty:
 
 # -------------------- SIDEBAR FILTERS --------------------
 st.sidebar.header("📅 Filters")
-min_date = df_raw['Timestamp'].min().date()
-max_date = df_raw['Timestamp'].max().date()
 
-# Date range filter
-start_date, end_date = st.sidebar.date_input(
+# Date filter: From March 1st to a day after today
+min_date = datetime(2025, 3, 1).date()
+max_date = (datetime.now() + timedelta(days=1)).date()
+
+st.sidebar.markdown(f"🗓️ **Earliest Submission**: `{min_date}`")
+st.sidebar.markdown(f"🗓️ **Latest Submission**: `{max_date}`")
+
+# Date range selection
+date_range = st.sidebar.date_input(
     "Select Date Range:",
     value=(min_date, max_date),
     min_value=min_date,
     max_value=max_date
 )
 
+start_date, end_date = date_range if isinstance(date_range, tuple) else (date_range, date_range)
 filter_start = datetime.combine(start_date, datetime.min.time())
 filter_end = datetime.combine(end_date, datetime.max.time())
 
 # County filter
 counties = sorted(df_raw['County'].dropna().unique())
-selected_counties = st.sidebar.multiselect("Select Counties:", options=counties, default=counties)
+selected_counties = st.sidebar.multiselect(
+    "Select Counties:",
+    options=counties,
+    default=counties
+)
 
 # -------------------- FILTER DATA --------------------
 filtered_df = df_raw[
@@ -65,34 +77,44 @@ filtered_df = df_raw[
 
 # -------------------- HIGH-LEVEL SUMMARY --------------------
 st.subheader("📈 High-Level Summary")
-st.metric("✅ Total Submissions (ALL)", f"{df_raw.shape[0]:,}")
-st.metric("📍 Total Counties Covered", df_raw['County'].nunique())
-st.metric("📊 Submissions in Range", f"{filtered_df.shape[0]:,}")
+col1, col2, col3 = st.columns(3)
+col1.metric("✅ Total Submissions (ALL)", f"{df_raw.shape[0]:,}")
+col2.metric("📍 Total Counties Covered", df_raw['County'].nunique())
+col3.metric("📊 Submissions in Range", f"{filtered_df.shape[0]:,}")
 
 # -------------------- COUNTY BREAKDOWN --------------------
-st.subheader("📊 Submissions by County")
-county_stats = filtered_df.groupby('County').size().reset_index(name='Count')
-if not county_stats.empty:
+st.subheader(f"📊 Submissions by County ({start_date} to {end_date})")
+filtered_county_stats = filtered_df.groupby('County').size().reset_index(name='Count')
+
+if not filtered_county_stats.empty:
     fig_bar = px.bar(
-        county_stats, x='County', y='Count', title="Submissions per County",
-        height=400, text=county_stats['Count'].apply(lambda x: f"{x:,}")
+        filtered_county_stats,
+        x='County',
+        y='Count',
+        title=f"Submissions per County ({start_date} to {end_date})",
+        height=400,
+        text=filtered_county_stats['Count'].apply(lambda x: f"{x:,}")
     )
     fig_bar.update_traces(textposition='auto')
     st.plotly_chart(fig_bar, use_container_width=True)
-    st.dataframe(county_stats)
 else:
-    st.info("ℹ️ No submissions for the selected period.")
+    st.info(f"ℹ️ No submissions for the selected date range.")
 
 # -------------------- NO SUBMISSIONS ANALYSIS --------------------
+st.subheader("🚫 Counties with No Submissions")
+
 all_counties_47 = [
-    "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta", "Garissa", "Wajir", "Mandera", "Marsabit",
-    "Isiolo", "Meru", "Tharaka Nithi", "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga",
-    "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans Nzoia", "Uasin Gishu", "Elgeyo Marakwet",
-    "Nandi", "Baringo", "Laikipia", "Nakuru", "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga",
-    "Bungoma", "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
+    "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta",
+    "Garissa", "Wajir", "Mandera", "Marsabit", "Isiolo", "Meru", "Tharaka Nithi",
+    "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga",
+    "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans Nzoia",
+    "Uasin Gishu", "Elgeyo Marakwet", "Nandi", "Baringo", "Laikipia", "Nakuru",
+    "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga", "Bungoma",
+    "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
 ]
-submitted_counties = filtered_df['County'].unique().tolist()
-no_submission_counties = [county for county in all_counties_47 if county not in submitted_counties]
+
+active_counties = filtered_df['County'].unique().tolist()
+no_submission_counties = [county for county in all_counties_47 if county not in active_counties]
 
 if no_submission_counties:
     st.error(f"🚫 Counties with NO Submissions: {', '.join(no_submission_counties)} ({len(no_submission_counties)} total)")
@@ -104,11 +126,11 @@ else:
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-if not county_stats.empty:
-    csv_data = convert_df_to_csv(county_stats)
+if not filtered_county_stats.empty:
+    filtered_csv = convert_df_to_csv(filtered_county_stats)
     st.download_button(
-        label="📥 Download County Stats CSV",
-        data=csv_data,
+        label=f"📥 Download Stats CSV ({start_date} to {end_date})",
+        data=filtered_csv,
         file_name=f"County_Stats_{start_date}_to_{end_date}.csv",
         mime='text/csv'
     )
