@@ -39,7 +39,7 @@ if df_raw.empty:
     st.stop()
 
 # -------------------- SIDEBAR FILTERS --------------------
-st.sidebar.header("📅 Filters")
+st.sidebar.header("🗓️ Filters")
 
 # Date filter: From March 1st to a day after today
 min_date = datetime(2025, 3, 1).date()
@@ -97,6 +97,10 @@ if not filtered_county_stats.empty:
     )
     fig_bar.update_traces(textposition='auto')
     st.plotly_chart(fig_bar, use_container_width=True)
+
+    # -------------------- NEW TABLE: Total Submissions Per County --------------------
+    st.subheader("🔢 Total Submissions Per County")
+    st.dataframe(filtered_county_stats.sort_values(by='Count', ascending=False).reset_index(drop=True))
 else:
     st.info(f"ℹ️ No submissions for the selected date range.")
 
@@ -129,7 +133,7 @@ def convert_df_to_csv(df):
 if not filtered_county_stats.empty:
     filtered_csv = convert_df_to_csv(filtered_county_stats)
     st.download_button(
-        label=f"📥 Download Stats CSV ({start_date} to {end_date})",
+        label=f"📅 Download Stats CSV ({start_date} to {end_date})",
         data=filtered_csv,
         file_name=f"County_Stats_{start_date}_to_{end_date}.csv",
         mime='text/csv'
