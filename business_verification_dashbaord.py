@@ -41,14 +41,12 @@ if df_raw.empty:
 # -------------------- SIDEBAR FILTERS --------------------
 st.sidebar.header("🗓️ Filters")
 
-# Date filter: From March 1st to a day after today
 min_date = datetime(2025, 3, 1).date()
 max_date = (datetime.now() + timedelta(days=1)).date()
 
 st.sidebar.markdown(f"🗓️ **Earliest Submission**: `{min_date}`")
 st.sidebar.markdown(f"🗓️ **Latest Submission**: `{max_date}`")
 
-# Date range selection
 date_range = st.sidebar.date_input(
     "Select Date Range:",
     value=(min_date, max_date),
@@ -60,7 +58,6 @@ start_date, end_date = date_range if isinstance(date_range, tuple) else (date_ra
 filter_start = datetime.combine(start_date, datetime.min.time())
 filter_end = datetime.combine(end_date, datetime.max.time())
 
-# County filter
 counties = sorted(df_raw['County'].dropna().unique())
 selected_counties = st.sidebar.multiselect(
     "Select Counties:",
@@ -98,7 +95,6 @@ if not filtered_county_stats.empty:
     fig_bar.update_traces(textposition='auto')
     st.plotly_chart(fig_bar, use_container_width=True)
 
-    # -------------------- NEW TABLE: Total Submissions Per County --------------------
     st.subheader("🔢 Total Submissions Per County")
     st.dataframe(filtered_county_stats.sort_values(by='Count', ascending=False).reset_index(drop=True))
 else:
@@ -106,7 +102,6 @@ else:
 
 # -------------------- NO SUBMISSIONS ANALYSIS --------------------
 st.subheader("🚫 Counties with No Submissions")
-
 all_counties_47 = [
     "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta",
     "Garissa", "Wajir", "Mandera", "Marsabit", "Isiolo", "Meru", "Tharaka Nithi",
