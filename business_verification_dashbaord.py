@@ -100,6 +100,25 @@ if not filtered_county_stats.empty:
 else:
     st.info(f"ℹ️ No submissions for the selected date range.")
 
+# -------------------- PERFORMANCE TREND OVER TIME --------------------
+st.subheader(f"📈 Submissions Over Time ({start_date} to {end_date})")
+
+# Prepare data for line chart
+daily_stats = filtered_df.groupby(filtered_df['Timestamp'].dt.date).size().reset_index(name='Submissions')
+
+if not daily_stats.empty:
+    fig_line = px.line(
+        daily_stats,
+        x='Timestamp',
+        y='Submissions',
+        title='Daily Submissions Trend',
+        markers=True
+    )
+    fig_line.update_layout(xaxis_title='Date', yaxis_title='Number of Submissions')
+    st.plotly_chart(fig_line, use_container_width=True)
+else:
+    st.info("ℹ️ No submission data available for the selected range to show trend.")
+
 # -------------------- NO SUBMISSIONS ANALYSIS --------------------
 st.subheader("🚫 Counties with No Submissions")
 all_counties_47 = [
