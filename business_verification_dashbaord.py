@@ -32,7 +32,7 @@ def load_data(url):
             df_raw['County'] = df_raw['County'].str.strip().str.title()
 
             # Drop duplicates by ID and Phone Number
-            df_raw = df_raw.drop_duplicates(subset=['Id', 'Phone Number'])
+            df_raw = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
 
             return df_raw
         except Exception as e:
