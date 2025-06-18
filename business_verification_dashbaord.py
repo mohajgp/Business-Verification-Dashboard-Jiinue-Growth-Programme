@@ -22,21 +22,24 @@ def load_data(url):
     with st.spinner("Loading data..."):
         try:
             df_raw = pd.read_csv(url)
+            
+            # Clean column names only (do NOT title-case them)
             df_raw.columns = df_raw.columns.str.strip()
-
-            # Standardize column names
-            df_raw.rename(columns=lambda x: x.strip().title(), inplace=True)
-
-            # Parse dates
+            
+            # Use exact original names
             df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
             df_raw['County'] = df_raw['County'].str.strip().str.title()
 
-            # Drop duplicates by ID and Phone Number
+            # Drop duplicates using actual exact column names
+            initial_rows = df_raw.shape[0]
             df_raw = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+            deduped_rows = df_raw.shape[0]
+
+            st.info(f"🧹 Removed {initial_rows - deduped_rows} duplicate entries based on ID and Phone.")
 
             return df_raw
         except Exception as e:
-            st.error(f"Error loading data: {e}")
+            st.error(f"❌ Error loading data: {e}")
             return pd.DataFrame()
 
 # -------------------- LOAD DATA --------------------
