@@ -24,8 +24,15 @@ def load_data(url):
             df_raw = pd.read_csv(url)
             df_raw.columns = df_raw.columns.str.strip()
 
-            df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], format='%m/%d/%Y %H:%M:%S', errors='coerce')
+            # Standardize column names
+            df_raw.rename(columns=lambda x: x.strip().title(), inplace=True)
+
+            # Parse dates
+            df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
             df_raw['County'] = df_raw['County'].str.strip().str.title()
+
+            # Drop duplicates by ID and Phone Number
+            df_raw = df_raw.drop_duplicates(subset=['Id', 'Phone Number'])
 
             return df_raw
         except Exception as e:
@@ -75,7 +82,7 @@ filtered_df = df_raw[
 # -------------------- HIGH-LEVEL SUMMARY --------------------
 st.subheader("📈 High-Level Summary")
 col1, col2, col3 = st.columns(3)
-col1.metric("✅ Total Submissions (ALL)", f"{df_raw.shape[0]:,}")
+col1.metric("✅ Total Unique Submissions", f"{df_raw.shape[0]:,}")
 col2.metric("📍 Total Counties Covered", df_raw['County'].nunique())
 col3.metric("📊 Submissions in Range", f"{filtered_df.shape[0]:,}")
 
@@ -102,8 +109,6 @@ else:
 
 # -------------------- PERFORMANCE TREND OVER TIME --------------------
 st.subheader(f"📈 Submissions Over Time ({start_date} to {end_date})")
-
-# Prepare data for line chart
 daily_stats = filtered_df.groupby(filtered_df['Timestamp'].dt.date).size().reset_index(name='Submissions')
 
 if not daily_stats.empty:
