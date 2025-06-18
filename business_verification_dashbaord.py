@@ -22,28 +22,21 @@ def load_data(url):
     with st.spinner("Loading data..."):
         try:
             df_raw = pd.read_csv(url)
-            
-            # Clean column names only (do NOT title-case them)
             df_raw.columns = df_raw.columns.str.strip()
-            
-            # Use exact original names
             df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
             df_raw['County'] = df_raw['County'].str.strip().str.title()
 
-            # Drop duplicates using actual exact column names
-            initial_rows = df_raw.shape[0]
+            total_rows_before_dedup = df_raw.shape[0]
             df_raw = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
-            deduped_rows = df_raw.shape[0]
+            total_rows_after_dedup = df_raw.shape[0]
 
-            st.info(f"🧹 Removed {initial_rows - deduped_rows} duplicate entries based on ID and Phone.")
-
-            return df_raw
+            return df_raw, total_rows_before_dedup, total_rows_after_dedup
         except Exception as e:
             st.error(f"❌ Error loading data: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame(), 0, 0
 
 # -------------------- LOAD DATA --------------------
-df_raw = load_data(SHEET_CSV_URL)
+df_raw, total_rows_before, total_rows_after = load_data(SHEET_CSV_URL)
 if df_raw.empty:
     st.warning("⚠️ No data loaded from the source. Check the URL or data availability.")
     st.stop()
@@ -84,10 +77,11 @@ filtered_df = df_raw[
 
 # -------------------- HIGH-LEVEL SUMMARY --------------------
 st.subheader("📈 High-Level Summary")
-col1, col2, col3 = st.columns(3)
-col1.metric("✅ Total Unique Submissions", f"{df_raw.shape[0]:,}")
-col2.metric("📍 Total Counties Covered", df_raw['County'].nunique())
-col3.metric("📊 Submissions in Range", f"{filtered_df.shape[0]:,}")
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("📄 Total Rows (Before Deduplication)", f"{total_rows_before:,}")
+col2.metric("✅ Unique Submissions", f"{total_rows_after:,}")
+col3.metric("📍 Total Counties Covered", df_raw['County'].nunique())
+col4.metric("📊 Submissions in Range", f"{filtered_df.shape[0]:,}")
 
 # -------------------- COUNTY BREAKDOWN --------------------
 st.subheader(f"📊 Submissions by County ({start_date} to {end_date})")
@@ -161,4 +155,4 @@ if not filtered_county_stats.empty:
         mime='text/csv'
     )
 
-st.success(f"✅ Dashboard updated dynamically as of {datetime.now().strftime('%B %d, %Y')}!")  
+st.success(f"✅ Dashboard updated dynamically as of {datetime.now().strftime('%B %d, %Y')}!")
