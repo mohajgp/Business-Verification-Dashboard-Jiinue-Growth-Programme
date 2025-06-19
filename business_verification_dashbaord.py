@@ -16,6 +16,15 @@ st.caption(f"Real-time view of business verifications by field officers - Stats 
 # -------------------- SETTINGS --------------------
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
 
+# -------------------- PHONE CLEANING FUNCTION --------------------
+def clean_phone(phone):
+    phone = str(phone).strip().replace("+", "")
+    if phone.startswith("0"):
+        return "254" + phone[1:]
+    elif phone.startswith("7"):
+        return "254" + phone
+    return phone
+
 # -------------------- FUNCTION TO LOAD DATA --------------------
 @st.cache_data(ttl=300)
 def load_data(url):
@@ -25,6 +34,11 @@ def load_data(url):
             df_raw.columns = df_raw.columns.str.strip()
             df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
             df_raw['County'] = df_raw['County'].str.strip().str.title()
+
+            # Clean key fields
+            df_raw['Verified ID Number'] = df_raw['Verified ID Number'].astype(str).str.upper().str.strip()
+            df_raw['Verified Phone Number'] = df_raw['Verified Phone Number'].astype(str).str.strip().apply(clean_phone)
+            df_raw = df_raw.dropna(subset=['Verified ID Number', 'Verified Phone Number'])
 
             total_rows_before_dedup = df_raw.shape[0]
             df_raw = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
