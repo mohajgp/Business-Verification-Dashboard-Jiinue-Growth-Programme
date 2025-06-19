@@ -32,44 +32,36 @@ def load_data(url):
     df.columns = df.columns.str.strip()
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
     df['County'] = df['County'].str.strip().str.title()
-
     df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip().str.upper()
     df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
-
-    total_before = df.shape[0]
     df['Date'] = df['Timestamp'].dt.date
-unique_dates = sorted(df['Date'].dropna().unique())
-selected_date = st.sidebar.selectbox("Select Date", options=unique_dates, index=len(unique_dates)-1)
-
-filtered_df = df[df['Date'] == selected_date].copy()
-
-# ✅ Deduplicate only within selected date
-filtered_df = filtered_df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
-
-    total_after = df.shape[0]
-
-    return df, total_before, total_after
+    return df
 
 # -------------------- LOAD DATA --------------------
-df, total_before, total_after = load_data(SHEET_CSV_URL)
+df = load_data(SHEET_CSV_URL)
+total_rows_before = df.shape[0]
 
-# -------------------- FILTER BY DATE --------------------
-df['Date'] = df['Timestamp'].dt.date
+# -------------------- DATE SELECTION --------------------
 unique_dates = sorted(df['Date'].dropna().unique())
-selected_date = st.sidebar.selectbox("Select Date", options=unique_dates, index=len(unique_dates)-1)
+selected_date = st.sidebar.selectbox("📅 Select Date", options=unique_dates, index=len(unique_dates)-1)
 
-filtered_df = df[df['Date'] == selected_date]
+# -------------------- FILTER THEN DEDUPLICATE --------------------
+df_selected = df[df['Date'] == selected_date].copy()
+rows_before_dedup = df_selected.shape[0]
+df_selected = df_selected.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+rows_after_dedup = df_selected.shape[0]
 
-# -------------------- SUMMARY --------------------
+# -------------------- METRICS --------------------
 st.subheader("🔍 Summary")
-col1, col2, col3 = st.columns(3)
-col1.metric("📄 Total Rows (Before Deduplication)", f"{total_before:,}")
-col2.metric("✅ Unique Rows (After Deduplication)", f"{total_after:,}")
-col3.metric("📅 Rows on " + str(selected_date), f"{filtered_df.shape[0]:,}")
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("📄 Total Rows (All Time)", f"{total_rows_before:,}")
+col2.metric("📅 Rows on " + str(selected_date), f"{rows_before_dedup:,}")
+col3.metric("✅ Unique on Selected Date", f"{rows_after_dedup:,}")
+col4.metric("📍 Counties on Selected Date", df_selected['County'].nunique())
 
 # -------------------- COUNTY BREAKDOWN --------------------
 st.subheader(f"📊 Submissions by County on {selected_date}")
-county_stats = filtered_df.groupby('County').size().reset_index(name='Count')
+county_stats = df_selected.groupby('County').size().reset_index(name='Count')
 
 if not county_stats.empty:
     fig = px.bar(
@@ -86,15 +78,15 @@ if not county_stats.empty:
 else:
     st.info("No data for the selected date.")
 
-# -------------------- DOWNLOAD BUTTON --------------------
+# -------------------- DOWNLOAD --------------------
 @st.cache_data
 def convert_df(df):
     return df.to_csv(index=False).encode("utf-8")
 
-if not filtered_df.empty:
+if not df_selected.empty:
     st.download_button(
-        label="📥 Download Filtered Data",
-        data=convert_df(filtered_df),
-        file_name=f"Business_Verification_{selected_date}.csv",
+        label="📥 Download CSV",
+        data=convert_df(df_selected),
+        file_name=f"Business_Verifications_{selected_date}.csv",
         mime="text/csv"
     )
