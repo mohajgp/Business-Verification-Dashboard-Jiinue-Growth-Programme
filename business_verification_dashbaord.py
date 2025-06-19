@@ -16,24 +16,34 @@ st.caption(f"Real-time view of business verifications by field officers - Stats 
 # -------------------- SETTINGS --------------------
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
 
-# -------------------- FUNCTION TO LOAD DATA --------------------
+# -------------------- PHONE NORMALIZATION --------------------
+def clean_phone(phone):
+    phone = str(phone).strip().replace(" ", "").replace("+", "").replace("-", "")
+    if phone.startswith("0"):
+        return "254" + phone[1:]
+    elif phone.startswith("7"):
+        return "254" + phone
+    return phone
+
+# -------------------- LOAD & TAG DUPLICATES --------------------
 @st.cache_data(ttl=300)
 def load_data(url):
     with st.spinner("Loading data..."):
-        try:
-            df_raw = pd.read_csv(url)
-            df_raw.columns = df_raw.columns.str.strip()
-            df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
-            df_raw['County'] = df_raw['County'].str.strip().str.title()
+        df = pd.read_csv(url)
+        df.columns = df.columns.str.strip()
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+        df['County'] = df['County'].str.strip().str.title()
 
-            total_rows_before_dedup = df_raw.shape[0]
-            df_raw = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
-            total_rows_after_dedup = df_raw.shape[0]
+        df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip().str.upper()
+        df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
 
-            return df_raw, total_rows_before_dedup, total_rows_after_dedup
-        except Exception as e:
-            st.error(f"❌ Error loading data: {e}")
-            return pd.DataFrame(), 0, 0
+        df['Is Duplicate'] = df.duplicated(subset=['Verified ID Number', 'Verified Phone Number'], keep='first')
+
+        total_rows_before = df.shape[0]
+        df_dedup = df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+        total_rows_after = df_dedup.shape[0]
+
+        return df, total_rows_before, total_rows_after
 
 # -------------------- LOAD DATA --------------------
 df_raw, total_rows_before, total_rows_after = load_data(SHEET_CSV_URL)
@@ -141,20 +151,22 @@ if no_submission_counties:
 else:
     st.success("✅ All counties have submissions!")
 
+# -------------------- FULL ROWS WITH DUPLICATES --------------------
+st.subheader("🧾 Full Rows (Includes Duplicates Tagged)")
+st.dataframe(filtered_df.sort_values(by='Is Duplicate').reset_index(drop=True))
+
 # -------------------- DOWNLOAD BUTTON --------------------
 @st.cache_data
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-if not filtered_county_stats.empty:
-    filtered_csv = convert_df_to_csv(filtered_county_stats)
+if not filtered_df.empty:
+    filtered_csv = convert_df_to_csv(filtered_df)
     st.download_button(
-        label=f"📅 Download Stats CSV ({start_date} to {end_date})",
+        label=f"📥 Download Filtered Rows (With Duplicates)",
         data=filtered_csv,
-        file_name=f"County_Stats_{start_date}_to_{end_date}.csv",
+        file_name=f"Business_Verification_With_Duplicates_{start_date}_to_{end_date}.csv",
         mime='text/csv'
     )
 
 st.success(f"✅ Dashboard updated dynamically as of {datetime.now().strftime('%B %d, %Y')}!")
-
-
