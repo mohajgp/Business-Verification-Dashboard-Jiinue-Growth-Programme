@@ -37,7 +37,15 @@ def load_data(url):
     df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
 
     total_before = df.shape[0]
-    df = df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+    df['Date'] = df['Timestamp'].dt.date
+unique_dates = sorted(df['Date'].dropna().unique())
+selected_date = st.sidebar.selectbox("Select Date", options=unique_dates, index=len(unique_dates)-1)
+
+filtered_df = df[df['Date'] == selected_date].copy()
+
+# ✅ Deduplicate only within selected date
+filtered_df = filtered_df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+
     total_after = df.shape[0]
 
     return df, total_before, total_after
