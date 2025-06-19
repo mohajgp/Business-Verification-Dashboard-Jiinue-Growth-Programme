@@ -35,9 +35,9 @@ def load_data(url):
             df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
             df_raw['County'] = df_raw['County'].str.strip().str.title()
 
-            # Clean fields — no dropping rows
+            # Clean fields — DO NOT drop rows with missing ID/Phone
             df_raw['Verified ID Number'] = df_raw['Verified ID Number'].astype(str).str.strip().str.upper()
-            df_raw['Verified Phone Number'] = df_raw['Verified Phone Number'].astype(str).str.strip().apply(clean_phone)
+            df_raw['Verified Phone Number'] = df_raw['Verified Phone Number'].astype(str).apply(clean_phone)
 
             total_rows_before_dedup = df_raw.shape[0]
             df_raw = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
@@ -54,14 +54,26 @@ if df_raw.empty:
     st.warning("⚠️ No data loaded from the source. Check the URL or data availability.")
     st.stop()
 
+# -------------------- DEBUG BLOCK FOR JUNE 19 --------------------
+st.markdown("### 🕵️ Debug: June 19 Row Count Breakdown")
+
+june19 = datetime(2025, 6, 19).date()
+df_raw['Date'] = df_raw['Timestamp'].dt.date
+
+df_june19 = df_raw[df_raw['Date'] == june19]
+count_before = df_june19.shape[0]
+
+df_june19_dedup = df_june19.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+count_after = df_june19_dedup.shape[0]
+
+st.info(f"📅 Rows for June 19 BEFORE deduplication: **{count_before}**")
+st.info(f"✅ Rows for June 19 AFTER deduplication (ID + Phone): **{count_after}**")
+
 # -------------------- SIDEBAR FILTERS --------------------
 st.sidebar.header("🗓️ Filters")
 
 min_date = datetime(2025, 3, 1).date()
 max_date = (datetime.now() + timedelta(days=1)).date()
-
-st.sidebar.markdown(f"🗓️ **Earliest Submission**: `{min_date}`")
-st.sidebar.markdown(f"🗓️ **Latest Submission**: `{max_date}`")
 
 date_range = st.sidebar.date_input(
     "Select Date Range:",
@@ -72,12 +84,6 @@ date_range = st.sidebar.date_input(
 
 start_date, end_date = date_range if isinstance(date_range, tuple) else (date_range, date_range)
 
-filtered_df = df_raw[
-    (df_raw['Timestamp'].dt.date >= start_date) &
-    (df_raw['Timestamp'].dt.date <= end_date) &
-    (df_raw['County'].isin(df_raw['County'].unique()))
-]
-
 counties = sorted(df_raw['County'].dropna().unique())
 selected_counties = st.sidebar.multiselect(
     "Select Counties:",
@@ -85,8 +91,12 @@ selected_counties = st.sidebar.multiselect(
     default=counties
 )
 
-# Apply county filter
-filtered_df = filtered_df[filtered_df['County'].isin(selected_counties)]
+# -------------------- FILTER DATA --------------------
+filtered_df = df_raw[
+    (df_raw['Date'] >= start_date) &
+    (df_raw['Date'] <= end_date) &
+    (df_raw['County'].isin(selected_counties))
+]
 
 # -------------------- HIGH-LEVEL SUMMARY --------------------
 st.subheader("📈 High-Level Summary")
