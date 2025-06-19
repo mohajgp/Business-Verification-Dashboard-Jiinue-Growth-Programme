@@ -16,7 +16,7 @@ st.caption(f"Real-time view of business verifications by field officers - Stats 
 # -------------------- SETTINGS --------------------
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
 
-# -------------------- PHONE NORMALIZATION --------------------
+# -------------------- PHONE CLEANING FUNCTION --------------------
 def clean_phone(phone):
     phone = str(phone).strip().replace(" ", "").replace("+", "").replace("-", "")
     if phone.startswith("0"):
@@ -25,41 +25,28 @@ def clean_phone(phone):
         return "254" + phone
     return phone
 
-# -------------------- LOAD & TAG DUPLICATES --------------------
+# -------------------- LOAD AND TAG DUPLICATES --------------------
 @st.cache_data(ttl=300)
 def load_data(url):
-    with st.spinner("Loading data..."):
-        df = pd.read_csv(url)
-        df.columns = df.columns.str.strip()
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
-        df['County'] = df['County'].str.strip().str.title()
-
-        df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip().str.upper()
-        df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
-
-        df['Is Duplicate'] = df.duplicated(subset=['Verified ID Number', 'Verified Phone Number'], keep='first')
-
-        total_rows_before = df.shape[0]
-        df_dedup = df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
-        total_rows_after = df_dedup.shape[0]
-
-        return df, total_rows_before, total_rows_after
+    df = pd.read_csv(url)
+    df.columns = df.columns.str.strip()
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+    df['County'] = df['County'].str.strip().str.title()
+    df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip().str.upper()
+    df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
+    df['Is Duplicate'] = df.duplicated(subset=['Verified ID Number', 'Verified Phone Number'], keep='first')
+    return df
 
 # -------------------- LOAD DATA --------------------
-df_raw, total_rows_before, total_rows_after = load_data(SHEET_CSV_URL)
+df_raw = load_data(SHEET_CSV_URL)
 if df_raw.empty:
     st.warning("⚠️ No data loaded from the source. Check the URL or data availability.")
     st.stop()
 
 # -------------------- SIDEBAR FILTERS --------------------
 st.sidebar.header("🗓️ Filters")
-
 min_date = datetime(2025, 3, 1).date()
 max_date = (datetime.now() + timedelta(days=1)).date()
-
-st.sidebar.markdown(f"🗓️ **Earliest Submission**: `{min_date}`")
-st.sidebar.markdown(f"🗓️ **Latest Submission**: `{max_date}`")
-
 date_range = st.sidebar.date_input(
     "Select Date Range:",
     value=(min_date, max_date),
@@ -85,13 +72,17 @@ filtered_df = df_raw[
     (df_raw['County'].isin(selected_counties))
 ]
 
-# -------------------- HIGH-LEVEL SUMMARY --------------------
-st.subheader("📈 High-Level Summary")
+# -------------------- METRICS (FILTERED VIEW) --------------------
+st.subheader("📈 High-Level Summary (Filtered View)")
+total_filtered_rows = filtered_df.shape[0]
+unique_filtered_rows = filtered_df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number']).shape[0]
+filtered_counties = filtered_df['County'].nunique()
+
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("📄 Total Rows (Before Deduplication)", f"{total_rows_before:,}")
-col2.metric("✅ Unique Submissions", f"{total_rows_after:,}")
-col3.metric("📍 Total Counties Covered", df_raw['County'].nunique())
-col4.metric("📊 Submissions in Range", f"{filtered_df.shape[0]:,}")
+col1.metric("📄 Total Rows (Before Deduplication)", f"{total_filtered_rows:,}")
+col2.metric("✅ Unique Submissions", f"{unique_filtered_rows:,}")
+col3.metric("📍 Total Counties Covered", filtered_counties)
+col4.metric("📊 Submissions in Range", f"{total_filtered_rows:,}")
 
 # -------------------- COUNTY BREAKDOWN --------------------
 st.subheader(f"📊 Submissions by County ({start_date} to {end_date})")
@@ -114,7 +105,7 @@ if not filtered_county_stats.empty:
 else:
     st.info(f"ℹ️ No submissions for the selected date range.")
 
-# -------------------- PERFORMANCE TREND OVER TIME --------------------
+# -------------------- PERFORMANCE TREND --------------------
 st.subheader(f"📈 Submissions Over Time ({start_date} to {end_date})")
 daily_stats = filtered_df.groupby(filtered_df['Timestamp'].dt.date).size().reset_index(name='Submissions')
 
@@ -152,7 +143,7 @@ else:
     st.success("✅ All counties have submissions!")
 
 # -------------------- FULL ROWS WITH DUPLICATES --------------------
-st.subheader("🧾 Full Rows (Includes Duplicates Tagged)")
+st.subheader("🧾 Full Filtered Rows (Including Duplicates)")
 st.dataframe(filtered_df.sort_values(by='Is Duplicate').reset_index(drop=True))
 
 # -------------------- DOWNLOAD BUTTON --------------------
@@ -163,9 +154,9 @@ def convert_df_to_csv(df):
 if not filtered_df.empty:
     filtered_csv = convert_df_to_csv(filtered_df)
     st.download_button(
-        label=f"📥 Download Filtered Rows (With Duplicates)",
+        label=f"📥 Download Filtered Data (With Duplicates)",
         data=filtered_csv,
-        file_name=f"Business_Verification_With_Duplicates_{start_date}_to_{end_date}.csv",
+        file_name=f"Business_Verification_Filtered_{start_date}_to_{end_date}.csv",
         mime='text/csv'
     )
 
