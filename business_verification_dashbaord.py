@@ -11,82 +11,150 @@ st.set_page_config(
 )
 
 st.title("📍 KNCCI Jiinue Business Verification Dashboard")
-st.caption(f"Updated as of {datetime.now().strftime('%B %d, %Y')}")
+st.caption(f"Real-time view of business verifications by field officers - Stats as of {datetime.now().strftime('%B %d, %Y')}")
 
 # -------------------- SETTINGS --------------------
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
 
-# -------------------- PHONE NORMALIZATION --------------------
-def clean_phone(phone):
-    phone = str(phone).strip().replace(" ", "").replace("+", "").replace("-", "")
-    if phone.startswith("0"):
-        return "254" + phone[1:]
-    elif phone.startswith("7"):
-        return "254" + phone
-    return phone
-
-# -------------------- LOAD & CLEAN DATA --------------------
+# -------------------- FUNCTION TO LOAD DATA --------------------
 @st.cache_data(ttl=300)
 def load_data(url):
-    df = pd.read_csv(url)
-    df.columns = df.columns.str.strip()
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
-    df['County'] = df['County'].str.strip().str.title()
-    df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip().str.upper()
-    df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
-    df['Date'] = df['Timestamp'].dt.date
-    return df
+    with st.spinner("Loading data..."):
+        try:
+            df_raw = pd.read_csv(url)
+            df_raw.columns = df_raw.columns.str.strip()
+            df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
+            df_raw['County'] = df_raw['County'].str.strip().str.title()
+
+            total_rows_before_dedup = df_raw.shape[0]
+            df_raw = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+            total_rows_after_dedup = df_raw.shape[0]
+
+            return df_raw, total_rows_before_dedup, total_rows_after_dedup
+        except Exception as e:
+            st.error(f"❌ Error loading data: {e}")
+            return pd.DataFrame(), 0, 0
 
 # -------------------- LOAD DATA --------------------
-df = load_data(SHEET_CSV_URL)
-total_rows_before = df.shape[0]
+df_raw, total_rows_before, total_rows_after = load_data(SHEET_CSV_URL)
+if df_raw.empty:
+    st.warning("⚠️ No data loaded from the source. Check the URL or data availability.")
+    st.stop()
 
-# -------------------- DATE SELECTION --------------------
-unique_dates = sorted(df['Date'].dropna().unique())
-selected_date = st.sidebar.selectbox("📅 Select Date", options=unique_dates, index=len(unique_dates)-1)
+# -------------------- SIDEBAR FILTERS --------------------
+st.sidebar.header("🗓️ Filters")
 
-# -------------------- FILTER THEN DEDUPLICATE --------------------
-df_selected = df[df['Date'] == selected_date].copy()
-rows_before_dedup = df_selected.shape[0]
-df_selected = df_selected.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
-rows_after_dedup = df_selected.shape[0]
+min_date = datetime(2025, 3, 1).date()
+max_date = (datetime.now() + timedelta(days=1)).date()
 
-# -------------------- METRICS --------------------
-st.subheader("🔍 Summary")
+st.sidebar.markdown(f"🗓️ **Earliest Submission**: `{min_date}`")
+st.sidebar.markdown(f"🗓️ **Latest Submission**: `{max_date}`")
+
+date_range = st.sidebar.date_input(
+    "Select Date Range:",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
+
+start_date, end_date = date_range if isinstance(date_range, tuple) else (date_range, date_range)
+filter_start = datetime.combine(start_date, datetime.min.time())
+filter_end = datetime.combine(end_date, datetime.max.time())
+
+counties = sorted(df_raw['County'].dropna().unique())
+selected_counties = st.sidebar.multiselect(
+    "Select Counties:",
+    options=counties,
+    default=counties
+)
+
+# -------------------- FILTER DATA --------------------
+filtered_df = df_raw[
+    (df_raw['Timestamp'] >= filter_start) &
+    (df_raw['Timestamp'] <= filter_end) &
+    (df_raw['County'].isin(selected_counties))
+]
+
+# -------------------- HIGH-LEVEL SUMMARY --------------------
+st.subheader("📈 High-Level Summary")
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("📄 Total Rows (All Time)", f"{total_rows_before:,}")
-col2.metric("📅 Rows on " + str(selected_date), f"{rows_before_dedup:,}")
-col3.metric("✅ Unique on Selected Date", f"{rows_after_dedup:,}")
-col4.metric("📍 Counties on Selected Date", df_selected['County'].nunique())
+col1.metric("📄 Total Rows (Before Deduplication)", f"{total_rows_before:,}")
+col2.metric("✅ Unique Submissions", f"{total_rows_after:,}")
+col3.metric("📍 Total Counties Covered", df_raw['County'].nunique())
+col4.metric("📊 Submissions in Range", f"{filtered_df.shape[0]:,}")
 
 # -------------------- COUNTY BREAKDOWN --------------------
-st.subheader(f"📊 Submissions by County on {selected_date}")
-county_stats = df_selected.groupby('County').size().reset_index(name='Count')
+st.subheader(f"📊 Submissions by County ({start_date} to {end_date})")
+filtered_county_stats = filtered_df.groupby('County').size().reset_index(name='Count')
 
-if not county_stats.empty:
-    fig = px.bar(
-        county_stats,
+if not filtered_county_stats.empty:
+    fig_bar = px.bar(
+        filtered_county_stats,
         x='County',
         y='Count',
-        title='County Breakdown',
-        text='Count',
-        height=400
+        title=f"Submissions per County ({start_date} to {end_date})",
+        height=400,
+        text=filtered_county_stats['Count'].apply(lambda x: f"{x:,}")
     )
-    fig.update_traces(textposition='outside')
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(county_stats.sort_values(by='Count', ascending=False))
+    fig_bar.update_traces(textposition='auto')
+    st.plotly_chart(fig_bar, use_container_width=True)
+
+    st.subheader("🔢 Total Submissions Per County")
+    st.dataframe(filtered_county_stats.sort_values(by='Count', ascending=False).reset_index(drop=True))
 else:
-    st.info("No data for the selected date.")
+    st.info(f"ℹ️ No submissions for the selected date range.")
 
-# -------------------- DOWNLOAD --------------------
-@st.cache_data
-def convert_df(df):
-    return df.to_csv(index=False).encode("utf-8")
+# -------------------- PERFORMANCE TREND OVER TIME --------------------
+st.subheader(f"📈 Submissions Over Time ({start_date} to {end_date})")
+daily_stats = filtered_df.groupby(filtered_df['Timestamp'].dt.date).size().reset_index(name='Submissions')
 
-if not df_selected.empty:
-    st.download_button(
-        label="📥 Download CSV",
-        data=convert_df(df_selected),
-        file_name=f"Business_Verifications_{selected_date}.csv",
-        mime="text/csv"
+if not daily_stats.empty:
+    fig_line = px.line(
+        daily_stats,
+        x='Timestamp',
+        y='Submissions',
+        title='Daily Submissions Trend',
+        markers=True
     )
+    fig_line.update_layout(xaxis_title='Date', yaxis_title='Number of Submissions')
+    st.plotly_chart(fig_line, use_container_width=True)
+else:
+    st.info("ℹ️ No submission data available for the selected range to show trend.")
+
+# -------------------- NO SUBMISSIONS ANALYSIS --------------------
+st.subheader("🚫 Counties with No Submissions")
+all_counties_47 = [
+    "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta",
+    "Garissa", "Wajir", "Mandera", "Marsabit", "Isiolo", "Meru", "Tharaka Nithi",
+    "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga",
+    "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans Nzoia",
+    "Uasin Gishu", "Elgeyo Marakwet", "Nandi", "Baringo", "Laikipia", "Nakuru",
+    "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga", "Bungoma",
+    "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
+]
+
+active_counties = filtered_df['County'].unique().tolist()
+no_submission_counties = [county for county in all_counties_47 if county not in active_counties]
+
+if no_submission_counties:
+    st.error(f"🚫 Counties with NO Submissions: {', '.join(no_submission_counties)} ({len(no_submission_counties)} total)")
+else:
+    st.success("✅ All counties have submissions!")
+
+# -------------------- DOWNLOAD BUTTON --------------------
+@st.cache_data
+def convert_df_to_csv(df):
+    return df.to_csv(index=False).encode('utf-8')
+
+if not filtered_county_stats.empty:
+    filtered_csv = convert_df_to_csv(filtered_county_stats)
+    st.download_button(
+        label=f"📅 Download Stats CSV ({start_date} to {end_date})",
+        data=filtered_csv,
+        file_name=f"County_Stats_{start_date}_to_{end_date}.csv",
+        mime='text/csv'
+    )
+
+st.success(f"✅ Dashboard updated dynamically as of {datetime.now().strftime('%B %d, %Y')}!")
+
+
