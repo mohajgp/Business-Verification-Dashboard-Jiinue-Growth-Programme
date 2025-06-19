@@ -18,7 +18,7 @@ SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_Tz
 
 # -------------------- PHONE CLEANING FUNCTION --------------------
 def clean_phone(phone):
-    phone = str(phone).strip().replace("+", "")
+    phone = str(phone).strip().replace("+", "").replace(" ", "").replace("-", "")
     if phone.startswith("0"):
         return "254" + phone[1:]
     elif phone.startswith("7"):
@@ -35,10 +35,9 @@ def load_data(url):
             df_raw['Timestamp'] = pd.to_datetime(df_raw['Timestamp'], errors='coerce')
             df_raw['County'] = df_raw['County'].str.strip().str.title()
 
-            # Clean key fields
-            df_raw['Verified ID Number'] = df_raw['Verified ID Number'].astype(str).str.upper().str.strip()
+            # Clean fields — no dropping rows
+            df_raw['Verified ID Number'] = df_raw['Verified ID Number'].astype(str).str.strip().str.upper()
             df_raw['Verified Phone Number'] = df_raw['Verified Phone Number'].astype(str).str.strip().apply(clean_phone)
-            df_raw = df_raw.dropna(subset=['Verified ID Number', 'Verified Phone Number'])
 
             total_rows_before_dedup = df_raw.shape[0]
             df_raw = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
@@ -72,8 +71,12 @@ date_range = st.sidebar.date_input(
 )
 
 start_date, end_date = date_range if isinstance(date_range, tuple) else (date_range, date_range)
-filter_start = datetime.combine(start_date, datetime.min.time())
-filter_end = datetime.combine(end_date, datetime.max.time())
+
+filtered_df = df_raw[
+    (df_raw['Timestamp'].dt.date >= start_date) &
+    (df_raw['Timestamp'].dt.date <= end_date) &
+    (df_raw['County'].isin(df_raw['County'].unique()))
+]
 
 counties = sorted(df_raw['County'].dropna().unique())
 selected_counties = st.sidebar.multiselect(
@@ -82,12 +85,8 @@ selected_counties = st.sidebar.multiselect(
     default=counties
 )
 
-# -------------------- FILTER DATA --------------------
-filtered_df = df_raw[
-    (df_raw['Timestamp'] >= filter_start) &
-    (df_raw['Timestamp'] <= filter_end) &
-    (df_raw['County'].isin(selected_counties))
-]
+# Apply county filter
+filtered_df = filtered_df[filtered_df['County'].isin(selected_counties)]
 
 # -------------------- HIGH-LEVEL SUMMARY --------------------
 st.subheader("📈 High-Level Summary")
