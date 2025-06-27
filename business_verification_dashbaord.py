@@ -99,12 +99,16 @@ col4.metric("📊 Unique Submissions in Range", f"{unique_filtered_rows:,}")
 # -------------------- COUNTY BREAKDOWN (UNIQUE SUBMISSIONS, ALL 47 COUNTIES) --------------------
 st.subheader(f"📊 Unique Submissions by County ({start_date} to {end_date})")
 
-# Ensure all 47 counties appear
-county_counts = unique_df['County'].value_counts().to_dict()
-filtered_county_stats = pd.DataFrame({
-    'County': all_counties_47,
-    'Count': [county_counts.get(c, 0) for c in all_counties_47]
-})
+# Correct grouping by deduplicated county counts
+county_grouped = (
+    unique_df.groupby('County')
+    .size()
+    .reindex(all_counties_47, fill_value=0)
+    .reset_index(name='Count')
+    .rename(columns={'index': 'County'})
+)
+
+filtered_county_stats = county_grouped
 
 fig_bar = px.bar(
     filtered_county_stats,
