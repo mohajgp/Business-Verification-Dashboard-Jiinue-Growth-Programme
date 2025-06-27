@@ -43,6 +43,17 @@ if df_raw.empty:
     st.warning("⚠️ No data loaded from the source. Check the URL or data availability.")
     st.stop()
 
+# -------------------- COUNTY MASTER LIST --------------------
+all_counties_47 = [
+    "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta",
+    "Garissa", "Wajir", "Mandera", "Marsabit", "Isiolo", "Meru", "Tharaka Nithi",
+    "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga",
+    "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans Nzoia",
+    "Uasin Gishu", "Elgeyo Marakwet", "Nandi", "Baringo", "Laikipia", "Nakuru",
+    "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga", "Bungoma",
+    "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
+]
+
 # -------------------- SIDEBAR FILTERS --------------------
 st.sidebar.header("🗓️ Filters")
 min_date = datetime(2025, 3, 1).date()
@@ -75,36 +86,39 @@ filtered_df = df_raw[
 # -------------------- METRICS (FILTERED VIEW) --------------------
 st.subheader("📈 High-Level Summary (Filtered View)")
 total_filtered_rows = filtered_df.shape[0]
-unique_filtered_rows = filtered_df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number']).shape[0]
-filtered_counties = filtered_df['County'].nunique()
+unique_df = filtered_df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+unique_filtered_rows = unique_df.shape[0]
+filtered_counties = unique_df['County'].nunique()
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("📄 Total Rows (Before Deduplication)", f"{total_filtered_rows:,}")
 col2.metric("✅ Unique Submissions", f"{unique_filtered_rows:,}")
 col3.metric("📍 Total Counties Covered", filtered_counties)
-col4.metric("📊 Submissions in Range", f"{unique_filtered_rows:,}")
+col4.metric("📊 Unique Submissions in Range", f"{unique_filtered_rows:,}")
 
-# -------------------- COUNTY BREAKDOWN (UNIQUE SUBMISSIONS ONLY) --------------------
+# -------------------- COUNTY BREAKDOWN (UNIQUE SUBMISSIONS, ALL 47 COUNTIES) --------------------
 st.subheader(f"📊 Unique Submissions by County ({start_date} to {end_date})")
-unique_df = filtered_df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
-filtered_county_stats = unique_df.groupby('County').size().reset_index(name='Count')
 
-if not filtered_county_stats.empty:
-    fig_bar = px.bar(
-        filtered_county_stats,
-        x='County',
-        y='Count',
-        title=f"Unique Submissions per County ({start_date} to {end_date})",
-        height=400,
-        text=filtered_county_stats['Count'].apply(lambda x: f"{x:,}")
-    )
-    fig_bar.update_traces(textposition='auto')
-    st.plotly_chart(fig_bar, use_container_width=True)
+# Ensure all 47 counties appear
+county_counts = unique_df['County'].value_counts().to_dict()
+filtered_county_stats = pd.DataFrame({
+    'County': all_counties_47,
+    'Count': [county_counts.get(c, 0) for c in all_counties_47]
+})
 
-    st.subheader("🔢 Total Unique Submissions Per County")
-    st.dataframe(filtered_county_stats.sort_values(by='Count', ascending=False).reset_index(drop=True))
-else:
-    st.info(f"ℹ️ No unique submissions for the selected date range.")
+fig_bar = px.bar(
+    filtered_county_stats,
+    x='County',
+    y='Count',
+    title=f"Unique Submissions per County ({start_date} to {end_date})",
+    height=400,
+    text=filtered_county_stats['Count'].apply(lambda x: f"{x:,}")
+)
+fig_bar.update_traces(textposition='auto')
+st.plotly_chart(fig_bar, use_container_width=True)
+
+st.subheader("🔢 Total Unique Submissions Per County")
+st.dataframe(filtered_county_stats.sort_values(by='Count', ascending=False).reset_index(drop=True))
 
 # -------------------- PERFORMANCE TREND --------------------
 st.subheader(f"📈 Submissions Over Time ({start_date} to {end_date})")
@@ -124,18 +138,8 @@ else:
     st.info("ℹ️ No submission data available for the selected range to show trend.")
 
 # -------------------- NO SUBMISSIONS ANALYSIS --------------------
-st.subheader("🚫 Counties with No Submissions")
-all_counties_47 = [
-    "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta",
-    "Garissa", "Wajir", "Mandera", "Marsabit", "Isiolo", "Meru", "Tharaka Nithi",
-    "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga",
-    "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans Nzoia",
-    "Uasin Gishu", "Elgeyo Marakwet", "Nandi", "Baringo", "Laikipia", "Nakuru",
-    "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga", "Bungoma",
-    "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
-]
-
-active_counties = filtered_county_stats['County'].unique().tolist()
+st.subheader("🚫 Counties with No Unique Submissions")
+active_counties = filtered_county_stats[filtered_county_stats['Count'] > 0]['County'].tolist()
 no_submission_counties = [county for county in all_counties_47 if county not in active_counties]
 
 if no_submission_counties:
