@@ -32,7 +32,9 @@ def load_data(url):
     df.columns = df.columns.str.strip()
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
     df['County'] = df['County'].str.strip().str.title()
-    df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip().str.upper()
+    # Normalize ID to handle potential .0 from Excel or mixed types
+    df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip()
+    df['Verified ID Number'] = df['Verified ID Number'].apply(lambda x: str(int(float(x))) if pd.notna(x) and str(x).replace('.', '').isdigit() else x).str.upper()
     df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
     df['Is Duplicate'] = df.duplicated(subset=['Verified ID Number', 'Verified Phone Number'], keep='first')
     return df
@@ -43,7 +45,7 @@ if df_raw.empty:
     st.warning("⚠️ No data loaded from the source. Check the URL or data availability.")
     st.stop()
 
-# -------------------- COUNTY MASTER LIST --------------------
+# -------------------- COUNTY MASTER LIST (Used for reference, not direct filtering of display) --------------------
 all_counties_47 = [
     "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta",
     "Garissa", "Wajir", "Mandera", "Marsabit", "Isiolo", "Meru", "Tharaka Nithi",
@@ -56,24 +58,32 @@ all_counties_47 = [
 
 # -------------------- SIDEBAR FILTERS --------------------
 st.sidebar.header("🗓️ Filters")
-min_date = datetime(2025, 3, 1).date()
-max_date = (datetime.now() + timedelta(days=1)).date()
-date_range = st.sidebar.date_input(
-    "Select Date Range:",
-    value=(min_date, max_date),
-    min_value=min_date,
-    max_value=max_date
+# Set a reasonable default min_date if df_raw['Timestamp'] is empty or has NaT
+default_min_date = df_raw['Timestamp'].min().date() if not df_raw['Timestamp'].empty and pd.notna(df_raw['Timestamp'].min()) else datetime(2023, 1, 1).date()
+default_max_date = df_raw['Timestamp'].max().date() if not df_raw['Timestamp'].empty and pd.notna(df_raw['Timestamp'].max()) else datetime.now().date()
+
+min_date_filter = st.sidebar.date_input(
+    "Select Start Date:",
+    value=default_min_date,
+    min_value=datetime(2023, 1, 1).date(), # Absolute min to prevent errors
+    max_value=default_max_date
 )
 
-start_date, end_date = date_range if isinstance(date_range, tuple) else (date_range, date_range)
-filter_start = datetime.combine(start_date, datetime.min.time())
-filter_end = datetime.combine(end_date, datetime.max.time())
+max_date_filter = st.sidebar.date_input(
+    "Select End Date:",
+    value=default_max_date,
+    min_value=min_date_filter, # End date cannot be before start date
+    max_value=default_max_date
+)
 
-counties = sorted(df_raw['County'].dropna().unique())
+filter_start = datetime.combine(min_date_filter, datetime.min.time())
+filter_end = datetime.combine(max_date_filter, datetime.max.time())
+
+counties_in_data = sorted(df_raw['County'].dropna().unique())
 selected_counties = st.sidebar.multiselect(
     "Select Counties:",
-    options=counties,
-    default=counties
+    options=counties_in_data,
+    default=counties_in_data
 )
 
 # -------------------- FILTER DATA --------------------
@@ -83,49 +93,58 @@ filtered_df = df_raw[
     (df_raw['County'].isin(selected_counties))
 ]
 
+# Create unique_df *after* all filters are applied
+unique_df = filtered_df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+
 # -------------------- METRICS (FILTERED VIEW) --------------------
 st.subheader("📈 High-Level Summary (Filtered View)")
 total_filtered_rows = filtered_df.shape[0]
-unique_df = filtered_df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
 unique_filtered_rows = unique_df.shape[0]
-filtered_counties = unique_df['County'].nunique()
+filtered_counties_covered = unique_df['County'].nunique() # Counties with unique submissions in the filtered set
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("📄 Total Rows (Before Deduplication)", f"{total_filtered_rows:,}")
 col2.metric("✅ Unique Submissions", f"{unique_filtered_rows:,}")
-col3.metric("📍 Total Counties Covered", filtered_counties)
+col3.metric("📍 Counties Covered", filtered_counties_covered)
+# This metric is redundant with col2, let's change it to something else if needed,
+# or just remove it if 3 columns are enough. Keeping for now as per original.
 col4.metric("📊 Unique Submissions in Range", f"{unique_filtered_rows:,}")
 
-# -------------------- COUNTY BREAKDOWN (UNIQUE SUBMISSIONS, ALL 47 COUNTIES) --------------------
-st.subheader(f"📊 Unique Submissions by County ({start_date} to {end_date})")
+# -------------------- COUNTY BREAKDOWN (UNIQUE SUBMISSIONS, ONLY SELECTED COUNTIES) --------------------
+st.subheader(f"📊 Unique Submissions by County (Filtered: {min_date_filter} to {max_date_filter})")
 
-# Correct grouping by deduplicated county counts
-county_grouped = (
-    unique_df.groupby('County')
-    .size()
-    .reindex(all_counties_47, fill_value=0)
-    .reset_index(name='Count')
-    .rename(columns={'index': 'County'})
-)
+# Calculate unique submissions per county *within the filtered and unique data*
+# This will only include counties that are both selected and have submissions
+county_counts_filtered = unique_df['County'].value_counts().reset_index()
+county_counts_filtered.columns = ['County', 'Count']
+# Sort by count descending for the dataframe display and bar chart
+filtered_county_stats_display = county_counts_filtered.sort_values(by='Count', ascending=False)
 
-filtered_county_stats = county_grouped
 
-fig_bar = px.bar(
-    filtered_county_stats,
-    x='County',
-    y='Count',
-    title=f"Unique Submissions per County ({start_date} to {end_date})",
-    height=400,
-    text=filtered_county_stats['Count'].apply(lambda x: f"{x:,}")
-)
-fig_bar.update_traces(textposition='auto')
-st.plotly_chart(fig_bar, use_container_width=True)
+if not filtered_county_stats_display.empty:
+    fig_bar = px.bar(
+        filtered_county_stats_display, # Use the filtered stats
+        x='County',
+        y='Count',
+        title=f"Unique Submissions per County (showing selected counties)",
+        height=400,
+        text=filtered_county_stats_display['Count'].apply(lambda x: f"{x:,}")
+    )
+    fig_bar.update_traces(textposition='auto')
+    st.plotly_chart(fig_bar, use_container_width=True)
+else:
+    st.info("ℹ️ No unique submissions for the selected counties and date range.")
 
-st.subheader("🔢 Total Unique Submissions Per County")
-st.dataframe(filtered_county_stats.sort_values(by='Count', ascending=False).reset_index(drop=True))
+
+st.subheader("🔢 Total Unique Submissions Per County (Table)")
+if not filtered_county_stats_display.empty:
+    st.dataframe(filtered_county_stats_display.reset_index(drop=True))
+else:
+    st.info("ℹ️ No unique submissions for the selected counties and date range to display in table.")
+
 
 # -------------------- PERFORMANCE TREND --------------------
-st.subheader(f"📈 Submissions Over Time ({start_date} to {end_date})")
+st.subheader(f"📈 Submissions Over Time ({min_date_filter} to {max_date_filter})")
 daily_stats = unique_df.groupby(unique_df['Timestamp'].dt.date).size().reset_index(name='Submissions')
 
 if not daily_stats.empty:
@@ -141,19 +160,25 @@ if not daily_stats.empty:
 else:
     st.info("ℹ️ No submission data available for the selected range to show trend.")
 
-# -------------------- NO SUBMISSIONS ANALYSIS --------------------
-st.subheader("🚫 Counties with No Unique Submissions")
-active_counties = filtered_county_stats[filtered_county_stats['Count'] > 0]['County'].tolist()
-no_submission_counties = [county for county in all_counties_47 if county not in active_counties]
+# -------------------- NO SUBMISSIONS ANALYSIS (within selected counties) --------------------
+st.subheader("🚫 Counties with No Unique Submissions (within selected filter)")
+# Get counties that are selected in the filter but have 0 unique submissions
+active_counties_with_submissions = unique_df['County'].unique().tolist()
+no_submission_counties_in_filter = [
+    county for county in selected_counties if county not in active_counties_with_submissions
+]
 
-if no_submission_counties:
-    st.error(f"🚫 Counties with NO Unique Submissions: {', '.join(no_submission_counties)} ({len(no_submission_counties)} total)")
+if no_submission_counties_in_filter:
+    st.error(f"🚫 Counties with NO Unique Submissions (in your current filter): {', '.join(no_submission_counties_in_filter)} ({len(no_submission_counties_in_filter)} total)")
 else:
-    st.success("✅ All counties have unique submissions!")
+    st.success("✅ All selected counties have unique submissions!")
 
 # -------------------- FULL ROWS WITH DUPLICATES --------------------
 st.subheader("🧾 Full Filtered Rows (Including Duplicates)")
-st.dataframe(filtered_df.sort_values(by='Is Duplicate').reset_index(drop=True))
+if not filtered_df.empty:
+    st.dataframe(filtered_df.sort_values(by='Is Duplicate').reset_index(drop=True))
+else:
+    st.info("ℹ️ No data available for the selected filters.")
 
 # -------------------- DOWNLOAD BUTTON --------------------
 @st.cache_data
@@ -165,8 +190,10 @@ if not unique_df.empty:
     st.download_button(
         label=f"📥 Download Unique Submissions",
         data=filtered_csv,
-        file_name=f"Business_Verification_Unique_{start_date}_to_{end_date}.csv",
+        file_name=f"Business_Verification_Unique_{min_date_filter}_to_{max_date_filter}.csv",
         mime='text/csv'
     )
+else:
+    st.info("ℹ️ No unique submissions to download for the selected filters.")
 
 st.success(f"✅ Dashboard updated dynamically as of {datetime.now().strftime('%B %d, %Y')}!")
