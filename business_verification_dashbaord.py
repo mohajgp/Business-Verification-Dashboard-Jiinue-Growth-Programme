@@ -82,39 +82,40 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("📄 Total Rows (Before Deduplication)", f"{total_filtered_rows:,}")
 col2.metric("✅ Unique Submissions", f"{unique_filtered_rows:,}")
 col3.metric("📍 Total Counties Covered", filtered_counties)
-col4.metric("📊 Submissions in Range", f"{total_filtered_rows:,}")
+col4.metric("📊 Submissions in Range", f"{unique_filtered_rows:,}")
 
-# -------------------- COUNTY BREAKDOWN --------------------
-st.subheader(f"📊 Submissions by County ({start_date} to {end_date})")
-filtered_county_stats = filtered_df.groupby('County').size().reset_index(name='Count')
+# -------------------- COUNTY BREAKDOWN (UNIQUE SUBMISSIONS ONLY) --------------------
+st.subheader(f"📊 Unique Submissions by County ({start_date} to {end_date})")
+unique_df = filtered_df.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number'])
+filtered_county_stats = unique_df.groupby('County').size().reset_index(name='Count')
 
 if not filtered_county_stats.empty:
     fig_bar = px.bar(
         filtered_county_stats,
         x='County',
         y='Count',
-        title=f"Submissions per County ({start_date} to {end_date})",
+        title=f"Unique Submissions per County ({start_date} to {end_date})",
         height=400,
         text=filtered_county_stats['Count'].apply(lambda x: f"{x:,}")
     )
     fig_bar.update_traces(textposition='auto')
     st.plotly_chart(fig_bar, use_container_width=True)
 
-    st.subheader("🔢 Total Submissions Per County")
+    st.subheader("🔢 Total Unique Submissions Per County")
     st.dataframe(filtered_county_stats.sort_values(by='Count', ascending=False).reset_index(drop=True))
 else:
-    st.info(f"ℹ️ No submissions for the selected date range.")
+    st.info(f"ℹ️ No unique submissions for the selected date range.")
 
 # -------------------- PERFORMANCE TREND --------------------
 st.subheader(f"📈 Submissions Over Time ({start_date} to {end_date})")
-daily_stats = filtered_df.groupby(filtered_df['Timestamp'].dt.date).size().reset_index(name='Submissions')
+daily_stats = unique_df.groupby(unique_df['Timestamp'].dt.date).size().reset_index(name='Submissions')
 
 if not daily_stats.empty:
     fig_line = px.line(
         daily_stats,
         x='Timestamp',
         y='Submissions',
-        title='Daily Submissions Trend',
+        title='Daily Unique Submissions Trend',
         markers=True
     )
     fig_line.update_layout(xaxis_title='Date', yaxis_title='Number of Submissions')
@@ -134,13 +135,13 @@ all_counties_47 = [
     "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
 ]
 
-active_counties = filtered_df['County'].unique().tolist()
+active_counties = filtered_county_stats['County'].unique().tolist()
 no_submission_counties = [county for county in all_counties_47 if county not in active_counties]
 
 if no_submission_counties:
-    st.error(f"🚫 Counties with NO Submissions: {', '.join(no_submission_counties)} ({len(no_submission_counties)} total)")
+    st.error(f"🚫 Counties with NO Unique Submissions: {', '.join(no_submission_counties)} ({len(no_submission_counties)} total)")
 else:
-    st.success("✅ All counties have submissions!")
+    st.success("✅ All counties have unique submissions!")
 
 # -------------------- FULL ROWS WITH DUPLICATES --------------------
 st.subheader("🧾 Full Filtered Rows (Including Duplicates)")
@@ -151,15 +152,13 @@ st.dataframe(filtered_df.sort_values(by='Is Duplicate').reset_index(drop=True))
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
-if not filtered_df.empty:
-    filtered_csv = convert_df_to_csv(filtered_df)
+if not unique_df.empty:
+    filtered_csv = convert_df_to_csv(unique_df)
     st.download_button(
-        label=f"📥 Download Filtered Data (With Duplicates)",
+        label=f"📥 Download Unique Submissions",
         data=filtered_csv,
-        file_name=f"Business_Verification_Filtered_{start_date}_to_{end_date}.csv",
+        file_name=f"Business_Verification_Unique_{start_date}_to_{end_date}.csv",
         mime='text/csv'
     )
 
 st.success(f"✅ Dashboard updated dynamically as of {datetime.now().strftime('%B %d, %Y')}!")
-
-
