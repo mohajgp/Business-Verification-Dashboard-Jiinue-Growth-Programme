@@ -25,21 +25,13 @@ def clean_phone(phone):
         return "254" + phone
     return phone
 
-# -------------------- COUNTY CLEANING FUNCTION --------------------
-def clean_county(value):
-    text = str(value).strip()
-    text = text.replace("’", "'").replace("‘", "'").replace("`", "'").title()
-    if text.lower() in ["muranga", "murang'a", "murang’a"]:
-        return "Murang'a"
-    return text
-
 # -------------------- LOAD AND TAG DUPLICATES --------------------
 @st.cache_data(ttl=300)
 def load_data(url):
     df = pd.read_csv(url)
     df.columns = df.columns.str.strip()
     df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
-    df['County'] = df['County'].apply(clean_county)
+    df['County'] = df['County'].str.strip().str.title()
     df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip().str.upper()
     df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
     df['Is Duplicate'] = df.duplicated(subset=['Verified ID Number', 'Verified Phone Number'], keep='first')
@@ -50,17 +42,6 @@ df_raw = load_data(SHEET_CSV_URL)
 if df_raw.empty:
     st.warning("⚠️ No data loaded from the source. Check the URL or data availability.")
     st.stop()
-
-# -------------------- COUNTY MASTER LIST --------------------
-all_counties_47 = [
-    "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta",
-    "Garissa", "Wajir", "Mandera", "Marsabit", "Isiolo", "Meru", "Tharaka Nithi",
-    "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga",
-    "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans Nzoia",
-    "Uasin Gishu", "Elgeyo Marakwet", "Nandi", "Baringo", "Laikipia", "Nakuru",
-    "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga", "Bungoma",
-    "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
-]
 
 # -------------------- SIDEBAR FILTERS --------------------
 st.sidebar.header("🗓️ Filters")
@@ -103,28 +84,14 @@ col2.metric("✅ Unique Submissions", f"{unique_filtered_rows:,}")
 col3.metric("📍 Total Counties Covered", filtered_counties)
 col4.metric("📊 Submissions in Range", f"{total_filtered_rows:,}")
 
-# -------------------- DEBUG: INVALID COUNTIES --------------------
-st.subheader("🧪 County Field Audit")
-
-invalid_rows = filtered_df[~filtered_df['County'].isin(all_counties_47)]
-missing_county = filtered_df['County'].isna().sum()
-invalid_count = invalid_rows.shape[0]
-
-if missing_county or invalid_count:
-    st.warning(f"⚠️ {missing_county} missing and {invalid_count} invalid county rows detected.")
-    st.dataframe(invalid_rows[['Timestamp', 'County', 'Verified Phone Number', 'Verified ID Number']])
-else:
-    st.success("✅ All county names are valid against the 47-county list.")
-
 # -------------------- COUNTY BREAKDOWN --------------------
 st.subheader(f"📊 Submissions by County ({start_date} to {end_date})")
-filtered_df['County Final'] = filtered_df['County'].apply(lambda x: x if x in all_counties_47 else "Other/Unknown")
-filtered_county_stats = filtered_df.groupby('County Final').size().reset_index(name='Count')
+filtered_county_stats = filtered_df.groupby('County').size().reset_index(name='Count')
 
 if not filtered_county_stats.empty:
     fig_bar = px.bar(
         filtered_county_stats,
-        x='County Final',
+        x='County',
         y='Count',
         title=f"Submissions per County ({start_date} to {end_date})",
         height=400,
@@ -157,7 +124,17 @@ else:
 
 # -------------------- NO SUBMISSIONS ANALYSIS --------------------
 st.subheader("🚫 Counties with No Submissions")
-active_counties = filtered_df['County Final'].unique().tolist()
+all_counties_47 = [
+    "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta",
+    "Garissa", "Wajir", "Mandera", "Marsabit", "Isiolo", "Meru", "Tharaka Nithi",
+    "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga",
+    "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans Nzoia",
+    "Uasin Gishu", "Elgeyo Marakwet", "Nandi", "Baringo", "Laikipia", "Nakuru",
+    "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga", "Bungoma",
+    "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
+]
+
+active_counties = filtered_df['County'].unique().tolist()
 no_submission_counties = [county for county in all_counties_47 if county not in active_counties]
 
 if no_submission_counties:
@@ -184,3 +161,5 @@ if not filtered_df.empty:
     )
 
 st.success(f"✅ Dashboard updated dynamically as of {datetime.now().strftime('%B %d, %Y')}!")
+
+
