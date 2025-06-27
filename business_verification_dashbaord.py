@@ -27,7 +27,11 @@ def clean_phone(phone):
 
 # -------------------- COUNTY CLEANING FUNCTION --------------------
 def clean_county(value):
-    return str(value).strip().replace("’", "'").replace("`", "'").title()
+    text = str(value).strip()
+    text = text.replace("’", "'").replace("‘", "'").replace("`", "'").title()
+    if text.lower() in ["muranga", "murang'a", "murang’a"]:
+        return "Murang'a"
+    return text
 
 # -------------------- LOAD AND TAG DUPLICATES --------------------
 @st.cache_data(ttl=300)
@@ -99,11 +103,10 @@ col2.metric("✅ Unique Submissions", f"{unique_filtered_rows:,}")
 col3.metric("📍 Total Counties Covered", filtered_counties)
 col4.metric("📊 Submissions in Range", f"{total_filtered_rows:,}")
 
-# -------------------- COUNTY CLEANUP AND DEBUG --------------------
+# -------------------- DEBUG: INVALID COUNTIES --------------------
 st.subheader("🧪 County Field Audit")
 
-filtered_df['County Cleaned'] = filtered_df['County'].apply(clean_county)
-invalid_rows = filtered_df[~filtered_df['County Cleaned'].isin(all_counties_47)]
+invalid_rows = filtered_df[~filtered_df['County'].isin(all_counties_47)]
 missing_county = filtered_df['County'].isna().sum()
 invalid_count = invalid_rows.shape[0]
 
@@ -115,9 +118,7 @@ else:
 
 # -------------------- COUNTY BREAKDOWN --------------------
 st.subheader(f"📊 Submissions by County ({start_date} to {end_date})")
-filtered_df['County Final'] = filtered_df['County Cleaned'].apply(
-    lambda x: x if x in all_counties_47 else "Other/Unknown"
-)
+filtered_df['County Final'] = filtered_df['County'].apply(lambda x: x if x in all_counties_47 else "Other/Unknown")
 filtered_county_stats = filtered_df.groupby('County Final').size().reset_index(name='Count')
 
 if not filtered_county_stats.empty:
