@@ -1,184 +1,197 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timedelta
+from datetime import datetime
+import pyperclip
+from io import BytesIO
+from docx import Document
 
 # -------------------- PAGE CONFIG --------------------
 st.set_page_config(
-    page_title="Business Verification Dashboard",
-    page_icon="📍",
+    page_title="KNCCI Mentorship Dashboard",
     layout="wide"
 )
 
-st.title("📍 KNCCI Jiinue Business Verification Dashboard")
-st.caption(f"Real-time view of business verifications by field officers - Stats as of {datetime.now().strftime('%B %d, %Y %H:%M:%S')}")
+st.title("KNCCI Jiinue Mentorship Dashboard")
+st.caption("Tracking Mentorship Sessions by Field Officers")
 
 # -------------------- SETTINGS --------------------
-SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
+OLD_FORM_URL = "https://docs.google.com/spreadsheets/d/107tWhbwBgF89VGCRnNSL4-_WrCIa68NGSPA4GkwVjDE/export?format=csv"
+NEW_FORM_URL = "https://docs.google.com/spreadsheets/d/1CA7WvTkEUfeMyLuxhP91BgSWbkhV_S8V94kACj5LUMM/export?format=csv"
 
-# -------------------- PHONE CLEANING FUNCTION --------------------
-def clean_phone(phone):
-    phone = str(phone).strip().replace(" ", "").replace("+", "").replace("-", "")
-    if phone.startswith("0"):
-        return "254" + phone[1:]
-    elif phone.startswith("7") and len(phone) == 9:
-        return "254" + phone
-    return phone
-
-# -------------------- LOAD DATA --------------------
+# -------------------- LOAD AND MERGE --------------------
 @st.cache_data(ttl=300)
-def load_data(url):
-    try:
-        df = pd.read_csv(url)
-        if df.empty:
-            return pd.DataFrame()
-        df.columns = df.columns.str.strip()
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
-        df.dropna(subset=['Timestamp'], inplace=True)
-        df['County'] = df['County'].astype(str).str.strip().str.title()
-        df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip().str.upper()
-        df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
-        df['Is Duplicate (Global)'] = df.duplicated(subset=['Verified ID Number', 'Verified Phone Number'], keep='first')
-        return df
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return pd.DataFrame()
+def load_raw_data():
+    df_old = pd.read_csv(OLD_FORM_URL)
+    df_new = pd.read_csv(NEW_FORM_URL)
 
-# -------------------- LOAD DATA --------------------
-df_raw = load_data(SHEET_CSV_URL)
+    df_old.columns = df_old.columns.str.strip()
+    df_new.columns = df_new.columns.str.strip()
+
+    df_old['Form Version'] = 'Original'
+    df_new['Form Version'] = 'New'
+
+    df_old.rename(columns={
+        'Timestamp': 'Timestamp',
+        'County': 'County',
+        'Gender': 'Gender',
+        'Age': 'Age',
+        'Business Phone Number': 'Phone Number'
+    }, inplace=True)
+
+    df_new.rename(columns={
+        'Timestamp': 'Timestamp',
+        '14. County of Business Location': 'County',
+        '12. Gender of mentee (participant)': 'Gender',
+        '11. Age of mentee (full years)': 'Age',
+        '10. Mobile phone Number (Format: 2547XXXXXXXX)': 'Phone Number',
+        '8. National ID (5 to 11 digits)': 'ID'
+    }, inplace=True)
+
+    for df in [df_old, df_new]:
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+        df['County'] = df['County'].astype(str).str.strip().str.title()
+        df['Gender'] = df['Gender'].astype(str).str.strip().str.title()
+        df['Age'] = pd.to_numeric(df['Age'], errors='coerce')
+        df['Phone Number'] = df['Phone Number'].astype(str).str.extract(r'(\d{9,12})')
+        if 'ID' not in df.columns:
+            df['ID'] = pd.NA
+
+    for col in df_new.columns:
+        if col not in df_old.columns:
+            df_old[col] = pd.NA
+    df_old = df_old[df_new.columns]
+
+    merged_df = pd.concat([df_old, df_new], ignore_index=True)
+    return merged_df
+
+# -------------------- LOAD --------------------
+df_raw = load_raw_data()
 if df_raw.empty:
-    st.warning("⚠️ No data loaded.")
+    st.error("❌ No data available! Please check both spreadsheets.")
     st.stop()
 
-# -------------------- GLOBAL METRICS (Sidebar) --------------------
-st.sidebar.markdown("### 📊 Global Summary (Before Filters)")
-global_total = df_raw.shape[0]
-global_unique = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number']).shape[0]
-global_duplicates = global_total - global_unique
+# -------------------- FILTERS --------------------
+st.sidebar.header("🗓️ Filter Sessions")
+min_date = df_raw['Timestamp'].min().date()
+max_date = df_raw['Timestamp'].max().date()
 
-st.sidebar.metric("📄 Total Rows", f"{global_total:,}")
-st.sidebar.metric("✅ Unique After Cleaning", f"{global_unique:,}")
-st.sidebar.metric("🧯 Global Duplicates", f"{global_duplicates:,}")
+date_range = st.sidebar.date_input("Select Date Range:", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+start_date, end_date = date_range if isinstance(date_range, tuple) else (date_range, date_range)
 
-# -------------------- SIDEBAR FILTERS --------------------
-st.sidebar.header("🗓️ Filters")
-min_available_date = df_raw['Timestamp'].min().date()
-max_available_date = df_raw['Timestamp'].max().date()
-default_start_date = max(datetime(2025, 3, 1).date(), min_available_date)
-default_end_date = max_available_date
+form_versions = df_raw['Form Version'].unique().tolist()
+selected_versions = st.sidebar.multiselect("Select Form Version:", options=form_versions, default=form_versions)
 
-date_range = st.sidebar.date_input("Select Date Range:", value=(default_start_date, default_end_date),
-                                   min_value=min_available_date, max_value=max_available_date)
+counties = df_raw['County'].dropna().unique()
+selected_counties = st.sidebar.multiselect("Select Counties:", options=sorted(counties), default=sorted(counties))
 
-if len(date_range) == 2:
-    start_date, end_date = date_range
-elif len(date_range) == 1:
-    start_date = end_date = date_range[0]
-else:
-    start_date = default_start_date
-    end_date = default_end_date
+genders = df_raw['Gender'].dropna().unique()
+selected_genders = st.sidebar.multiselect("Select Gender:", options=sorted(genders), default=sorted(genders))
 
-filter_start_dt = datetime.combine(start_date, datetime.min.time())
-filter_end_dt = datetime.combine(end_date, datetime.max.time())
-
-counties = sorted(df_raw['County'].dropna().unique())
-selected_counties = st.sidebar.multiselect("Select Counties:", options=counties, default=counties)
-
-# -------------------- FILTER DATA --------------------
 filtered_df = df_raw[
-    (df_raw['Timestamp'] >= filter_start_dt) &
-    (df_raw['Timestamp'] <= filter_end_dt) &
-    (df_raw['County'].isin(selected_counties))
-].copy()
+    (df_raw['Timestamp'].dt.date >= start_date) &
+    (df_raw['Timestamp'].dt.date <= end_date) &
+    (df_raw['Form Version'].isin(selected_versions)) &
+    (df_raw['County'].isin(selected_counties)) &
+    (df_raw['Gender'].isin(selected_genders))
+]
 
-# -------------------- DEDUPLICATE FILTERED DATA --------------------
-deduplicated_filtered_df = filtered_df.drop_duplicates(
-    subset=['Verified ID Number', 'Verified Phone Number'], keep='first'
-).copy()
+deduped_df = filtered_df.drop_duplicates(subset=['Phone Number', 'ID'])
 
-# -------------------- FILTERED METRICS --------------------
-st.subheader("📈 High-Level Summary (Filtered View)")
-total_filtered_rows = filtered_df.shape[0]
-unique_filtered_rows = deduplicated_filtered_df.shape[0]
-filtered_counties_covered = deduplicated_filtered_df['County'].nunique()
-
+# -------------------- METRICS --------------------
+st.subheader("📈 Summary Metrics")
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("📄 Total Submissions (Filtered)", f"{total_filtered_rows:,}")
-col2.metric("✅ Unique Submissions (Filtered)", f"{unique_filtered_rows:,}")
-col3.metric("📍 Counties with Unique Submissions", filtered_counties_covered)
-col4.metric("📊 Avg Submissions/Day (Unique)",
-            f"{unique_filtered_rows / ((end_date - start_date).days + 1):,.2f}" if (end_date - start_date).days >= 0 else "0.00")
+col1.metric("📄 Filtered Raw Records", f"{filtered_df.shape[0]:,}")
+col2.metric("✅ Unique Records (Post-Dedup)", f"{deduped_df.shape[0]:,}")
+col3.metric("📊 Filtered Sessions", f"{deduped_df.shape[0]:,}")
+col4.metric("📍 Counties Covered", deduped_df['County'].nunique())
 
-# -------------------- COUNTY BREAKDOWN --------------------
-st.subheader(f"📊 Unique Submissions by County ({start_date} to {end_date})")
-unique_county_stats = deduplicated_filtered_df.groupby('County').size().reset_index(name='Unique Count')
+# -------------------- AGE/GENDER BREAKDOWN --------------------
+st.subheader("👥 Age & Gender Breakdown")
 
-if not unique_county_stats.empty:
-    fig_bar = px.bar(unique_county_stats, x='County', y='Unique Count', title='Unique Submissions per County',
-                     height=450, text='Unique Count')
-    fig_bar.update_traces(texttemplate='%{text:,}', textposition='outside')
-    fig_bar.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
-    st.plotly_chart(fig_bar, use_container_width=True)
+def categorize(row):
+    try:
+        age = int(row['Age'])
+    except:
+        return "Unknown"
+    gender = str(row['Gender']).strip().lower()
+    if 18 <= age <= 35:
+        if gender == "female":
+            return "Young female (18–35)"
+        elif gender == "male":
+            return "Young male (18–35)"
+    elif age > 35:
+        if gender == "female":
+            return "Female above 35"
+        elif gender == "male":
+            return "Male above 35"
+    return "Unknown"
 
-    st.subheader("🔢 Unique Submissions Per County Table")
-    st.dataframe(unique_county_stats.sort_values(by='Unique Count', ascending=False).reset_index(drop=True))
-else:
-    st.info("ℹ️ No unique submissions for selected filters.")
+deduped_df['Category'] = deduped_df.apply(categorize, axis=1)
+
+cat_counts = deduped_df['Category'].value_counts()
+cols = st.columns(5)
+cols[0].metric("👩 Young Females", cat_counts.get('Young female (18–35)', 0))
+cols[1].metric("👨 Young Males", cat_counts.get('Young male (18–35)', 0))
+cols[2].metric("👩‍🦳 Females >35", cat_counts.get('Female above 35', 0))
+cols[3].metric("👨‍🦳 Males >35", cat_counts.get('Male above 35', 0))
+cols[4].metric("❓ Unknown", cat_counts.get('Unknown', 0))
+
+# -------------------- AGE/GENDER SUMMARY --------------------
+st.subheader("📝 Auto-Generated Age & Gender Summary")
+
+age_gender_summary = f"""
+👥 **Age & Gender Breakdown** (within current filters and deduplication):
+
+- 👩 **Young Females (18–35)**: {cat_counts.get('Young female (18–35)', 0):,}
+- 👨 **Young Males (18–35)**: {cat_counts.get('Young male (18–35)', 0):,}
+- 👩‍🦳 **Females above 35**: {cat_counts.get('Female above 35', 0):,}
+- 👨‍🦳 **Males above 35**: {cat_counts.get('Male above 35', 0):,}
+- ❓ **Unknown / Missing Age/Gender**: {cat_counts.get('Unknown', 0):,}
+"""
+
+st.text_area("📋 Copy this Age & Gender Summary:", value=age_gender_summary, height=200)
+
+if st.button("📋 Copy Age & Gender Summary to Clipboard"):
+    pyperclip.copy(age_gender_summary)
+    st.success("✅ Age & Gender Summary copied to clipboard!")
+
+if st.button("⬇️ Export Age & Gender Summary to Word"):
+    doc = Document()
+    doc.add_heading("KNCCI Jiinue Age & Gender Summary Report", level=1)
+    doc.add_paragraph(age_gender_summary)
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    st.download_button(
+        label="📥 Download Age & Gender Word Report",
+        data=buffer,
+        file_name=f"Mentorship_Age_Gender_Summary_{datetime.now().date()}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+# -------------------- COUNTY CHART --------------------
+st.subheader("📍 Submissions by County")
+county_counts = deduped_df.groupby('County').size().reset_index(name='Submissions')
+fig_bar = px.bar(county_counts, x='County', y='Submissions', color='County', title='Number of Submissions by County')
+st.plotly_chart(fig_bar, use_container_width=True)
 
 # -------------------- DAILY TREND --------------------
-st.subheader(f"📈 Unique Submissions Over Time ({start_date} to {end_date})")
-daily_unique_stats = deduplicated_filtered_df.groupby(deduplicated_filtered_df['Timestamp'].dt.date).size().reset_index(name='Unique Submissions')
-daily_unique_stats.columns = ['Date', 'Unique Submissions']
+st.subheader("📆 Submissions Over Time")
+daily_counts = deduped_df.groupby(deduped_df['Timestamp'].dt.date).size().reset_index(name='Submissions')
+fig_time = px.line(daily_counts, x='Timestamp', y='Submissions', title='Daily Submission Trend')
+st.plotly_chart(fig_time, use_container_width=True)
 
-if not daily_unique_stats.empty:
-    fig_line = px.line(daily_unique_stats, x='Date', y='Unique Submissions',
-                       title='Daily Unique Submissions Trend', markers=True)
-    fig_line.update_layout(xaxis_title='Date', yaxis_title='Unique Submissions')
-    st.plotly_chart(fig_line, use_container_width=True)
-else:
-    st.info("ℹ️ No data for trend.")
+# -------------------- CLEANED TABLE --------------------
+st.subheader("✅ Cleaned Unique Records (Post-Filter)")
+st.dataframe(deduped_df)
 
-# -------------------- NO SUBMISSION COUNTIES --------------------
-st.subheader("🚫 Counties with No Unique Submissions (Filtered View)")
-all_counties_47 = [
-    "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta", "Garissa", "Wajir", "Mandera", "Marsabit",
-    "Isiolo", "Meru", "Tharaka Nithi", "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga",
-    "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans Nzoia", "Uasin Gishu", "Elgeyo Marakwet",
-    "Nandi", "Baringo", "Laikipia", "Nakuru", "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga",
-    "Bungoma", "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
-]
-active_counties_in_filter = deduplicated_filtered_df['County'].unique().tolist()
-relevant_all_counties = [c for c in all_counties_47 if c in selected_counties]
-no_submission_counties = [c for c in relevant_all_counties if c not in active_counties_in_filter]
-
-if no_submission_counties:
-    st.error(f"🚫 No unique submissions from: {', '.join(sorted(no_submission_counties))} ({len(no_submission_counties)} total)")
-else:
-    if selected_counties:
-        st.success("✅ All selected counties have unique submissions.")
-    else:
-        st.info("No counties selected.")
-
-# -------------------- FULL ROWS DISPLAY --------------------
-st.subheader("🧾 Full Filtered Rows (With Global Duplicate Tags)")
-st.caption("This includes duplicates for reference. Use global tag to assess redundancy.")
-
-if not filtered_df.empty:
-    st.dataframe(filtered_df.sort_values(by='Is Duplicate (Global)').reset_index(drop=True), use_container_width=True)
-else:
-    st.info("ℹ️ No filtered data to display.")
-
-# -------------------- DOWNLOAD BUTTONS --------------------
-@st.cache_data
-def convert_df_to_csv(df):
-    return df.to_csv(index=False).encode('utf-8')
-
-if not filtered_df.empty:
-    st.download_button("📥 Download All Filtered Rows", data=convert_df_to_csv(filtered_df),
-                       file_name=f"All_Filtered_{start_date}_{end_date}.csv", mime='text/csv')
-
-if not deduplicated_filtered_df.empty:
-    st.download_button("⬇️ Download Unique Submissions", data=convert_df_to_csv(deduplicated_filtered_df),
-                       file_name=f"Unique_Filtered_{start_date}_{end_date}.csv", mime='text/csv')
-
-st.success(f"✅ Dashboard updated dynamically at {datetime.now().strftime('%B %d, %Y %H:%M:%S')}")
+# -------------------- MERGED DOWNLOAD --------------------
+st.subheader("➕ Merged Full Data")
+full_csv = df_raw.to_csv(index=False).encode('utf-8')
+st.download_button(
+    label="📥 Download Merged CSV",
+    data=full_csv,
+    file_name=f"Mentorship_Merged_Data_{datetime.now().date()}.csv",
+    mime='text/csv'
+)
