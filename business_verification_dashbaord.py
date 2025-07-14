@@ -57,7 +57,7 @@ global_unique = df_raw.drop_duplicates(subset=['Verified ID Number', 'Verified P
 global_duplicates = global_total - global_unique
 
 st.sidebar.metric("📄 Total Rows", f"{global_total:,}")
-st.sidebar.metric("✅ Unique After Cleaning", f"{global_unique:,}")
+st.sidebar.metric("✅ Unique Across All", f"{global_unique:,}")
 st.sidebar.metric("🧯 Global Duplicates", f"{global_duplicates:,}")
 
 # -------------------- SIDEBAR FILTERS --------------------
@@ -104,10 +104,32 @@ filtered_counties_covered = deduplicated_filtered_df['County'].nunique()
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("📄 Total Submissions (Filtered)", f"{total_filtered_rows:,}")
-col2.metric("✅ Unique Submissions (Filtered)", f"{unique_filtered_rows:,}")
+col2.metric("✅ Unique After Cleaning (Filtered)", f"{unique_filtered_rows:,}")
 col3.metric("📍 Counties with Unique Submissions", filtered_counties_covered)
 col4.metric("📊 Avg Submissions/Day (Unique)",
             f"{unique_filtered_rows / ((end_date - start_date).days + 1):,.2f}" if (end_date - start_date).days >= 0 else "0.00")
+
+st.info(
+    "ℹ️ **Note:** Sum of monthly unique counts may exceed global unique count because participants can appear in multiple months."
+)
+
+# -------------------- UNIQUE PER MONTH --------------------
+st.subheader("📅 Unique Submissions Per Month (Filtered View)")
+monthly_uniques = (
+    filtered_df.drop_duplicates(
+        subset=['Verified ID Number', 'Verified Phone Number', filtered_df['Timestamp'].dt.to_period('M')]
+    )
+    .groupby(filtered_df['Timestamp'].dt.to_period('M'))
+    .size()
+    .reset_index(name='Unique Submissions This Month')
+    .rename(columns={'Timestamp': 'Month'})
+)
+
+if not monthly_uniques.empty:
+    monthly_uniques['Month'] = monthly_uniques['Month'].astype(str)
+    st.dataframe(monthly_uniques, use_container_width=True)
+else:
+    st.info("ℹ️ No monthly data for selected filters.")
 
 # -------------------- COUNTY BREAKDOWN --------------------
 st.subheader(f"📊 Unique Submissions by County ({start_date} to {end_date})")
@@ -124,19 +146,6 @@ if not unique_county_stats.empty:
     st.dataframe(unique_county_stats.sort_values(by='Unique Count', ascending=False).reset_index(drop=True))
 else:
     st.info("ℹ️ No unique submissions for selected filters.")
-
-# -------------------- DAILY TREND --------------------
-st.subheader(f"📈 Unique Submissions Over Time ({start_date} to {end_date})")
-daily_unique_stats = deduplicated_filtered_df.groupby(deduplicated_filtered_df['Timestamp'].dt.date).size().reset_index(name='Unique Submissions')
-daily_unique_stats.columns = ['Date', 'Unique Submissions']
-
-if not daily_unique_stats.empty:
-    fig_line = px.line(daily_unique_stats, x='Date', y='Unique Submissions',
-                       title='Daily Unique Submissions Trend', markers=True)
-    fig_line.update_layout(xaxis_title='Date', yaxis_title='Unique Submissions')
-    st.plotly_chart(fig_line, use_container_width=True)
-else:
-    st.info("ℹ️ No data for trend.")
 
 # -------------------- NO SUBMISSION COUNTIES --------------------
 st.subheader("🚫 Counties with No Unique Submissions (Filtered View)")
@@ -182,5 +191,3 @@ if not deduplicated_filtered_df.empty:
                        file_name=f"Unique_Filtered_{start_date}_{end_date}.csv", mime='text/csv')
 
 st.success(f"✅ Dashboard updated dynamically at {datetime.now().strftime('%B %d, %Y %H:%M:%S')}")
-
-
