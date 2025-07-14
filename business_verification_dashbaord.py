@@ -115,18 +115,23 @@ st.info(
 
 # -------------------- UNIQUE PER MONTH --------------------
 st.subheader("📅 Unique Submissions Per Month (Filtered View)")
+
+# Create Month column
+filtered_df['Month'] = filtered_df['Timestamp'].dt.to_period('M')
+
+# Drop duplicates within each month
 monthly_uniques = (
-    filtered_df.drop_duplicates(
-        subset=['Verified ID Number', 'Verified Phone Number', filtered_df['Timestamp'].dt.to_period('M')]
-    )
-    .groupby(filtered_df['Timestamp'].dt.to_period('M'))
+    filtered_df
+    .drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number', 'Month'])
+    .groupby('Month')
     .size()
     .reset_index(name='Unique Submissions This Month')
-    .rename(columns={'Timestamp': 'Month'})
 )
 
+# Format Month for display
+monthly_uniques['Month'] = monthly_uniques['Month'].astype(str)
+
 if not monthly_uniques.empty:
-    monthly_uniques['Month'] = monthly_uniques['Month'].astype(str)
     st.dataframe(monthly_uniques, use_container_width=True)
 else:
     st.info("ℹ️ No monthly data for selected filters.")
