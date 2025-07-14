@@ -109,17 +109,9 @@ col3.metric("📍 Counties with Unique Submissions", filtered_counties_covered)
 col4.metric("📊 Avg Submissions/Day (Unique)",
             f"{unique_filtered_rows / ((end_date - start_date).days + 1):,.2f}" if (end_date - start_date).days >= 0 else "0.00")
 
-st.info(
-    "ℹ️ **Note:** Sum of monthly unique counts may exceed global unique count because participants can appear in multiple months."
-)
-
-# -------------------- UNIQUE PER MONTH --------------------
-st.subheader("📅 Unique Submissions Per Month (Filtered View)")
-
-# Create Month column
+# -------------------- UNIQUE PER MONTH (PER-MONTH DEDUP) --------------------
+st.subheader("📅 Unique Submissions Per Month (Per-Month Deduplication)")
 filtered_df['Month'] = filtered_df['Timestamp'].dt.to_period('M')
-
-# Drop duplicates within each month
 monthly_uniques = (
     filtered_df
     .drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number', 'Month'])
@@ -127,16 +119,53 @@ monthly_uniques = (
     .size()
     .reset_index(name='Unique Submissions This Month')
 )
-
-# Format Month for display
 monthly_uniques['Month'] = monthly_uniques['Month'].astype(str)
 
 if not monthly_uniques.empty:
     st.dataframe(monthly_uniques, use_container_width=True)
+    sum_of_monthly_uniques = monthly_uniques['Unique Submissions This Month'].sum()
+    st.info(
+        f"ℹ️ Sum of monthly uniques: **{sum_of_monthly_uniques:,}**, "
+        f"but global unique across all months is: **{global_unique:,}**."
+    )
 else:
     st.info("ℹ️ No monthly data for selected filters.")
 
-# -------------------- COUNTY BREAKDOWN --------------------
+# -------------------- GLOBAL DEDUP → MONTHLY + COUNTY --------------------
+st.subheader("📊 Monthly & County Stats (Global Deduplication)")
+
+deduplicated_global_df = df_raw.drop_duplicates(
+    subset=['Verified ID Number', 'Verified Phone Number'], keep='first'
+).copy()
+deduplicated_global_df['Month'] = deduplicated_global_df['Timestamp'].dt.to_period('M')
+
+monthly_county_stats = (
+    deduplicated_global_df
+    .groupby(['Month', 'County'])
+    .size()
+    .reset_index(name='Unique Participants')
+    .sort_values(['Month', 'County'])
+)
+monthly_county_stats['Month'] = monthly_county_stats['Month'].astype(str)
+
+if not monthly_county_stats.empty:
+    st.dataframe(monthly_county_stats, use_container_width=True)
+else:
+    st.info("ℹ️ No data for monthly & county breakdown.")
+
+# Optional Heatmap
+heatmap_data = monthly_county_stats.pivot(index='County', columns='Month', values='Unique Participants').fillna(0)
+if not heatmap_data.empty:
+    fig_heatmap = px.imshow(
+        heatmap_data,
+        labels=dict(x="Month", y="County", color="Participants"),
+        text_auto=True,
+        aspect="auto",
+        title="Unique Participants by County and Month (Global Dedup)"
+    )
+    st.plotly_chart(fig_heatmap, use_container_width=True)
+
+# -------------------- COUNTY BREAKDOWN (Filtered) --------------------
 st.subheader(f"📊 Unique Submissions by County ({start_date} to {end_date})")
 unique_county_stats = deduplicated_filtered_df.groupby('County').size().reset_index(name='Unique Count')
 
@@ -144,34 +173,11 @@ if not unique_county_stats.empty:
     fig_bar = px.bar(unique_county_stats, x='County', y='Unique Count', title='Unique Submissions per County',
                      height=450, text='Unique Count')
     fig_bar.update_traces(texttemplate='%{text:,}', textposition='outside')
-    fig_bar.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
     st.plotly_chart(fig_bar, use_container_width=True)
 
-    st.subheader("🔢 Unique Submissions Per County Table")
     st.dataframe(unique_county_stats.sort_values(by='Unique Count', ascending=False).reset_index(drop=True))
 else:
     st.info("ℹ️ No unique submissions for selected filters.")
-
-# -------------------- NO SUBMISSION COUNTIES --------------------
-st.subheader("🚫 Counties with No Unique Submissions (Filtered View)")
-all_counties_47 = [
-    "Mombasa", "Kwale", "Kilifi", "Tana River", "Lamu", "Taita Taveta", "Garissa", "Wajir", "Mandera", "Marsabit",
-    "Isiolo", "Meru", "Tharaka Nithi", "Embu", "Kitui", "Machakos", "Makueni", "Nyandarua", "Nyeri", "Kirinyaga",
-    "Murang'a", "Kiambu", "Turkana", "West Pokot", "Samburu", "Trans Nzoia", "Uasin Gishu", "Elgeyo Marakwet",
-    "Nandi", "Baringo", "Laikipia", "Nakuru", "Narok", "Kajiado", "Kericho", "Bomet", "Kakamega", "Vihiga",
-    "Bungoma", "Busia", "Siaya", "Kisumu", "Homa Bay", "Migori", "Kisii", "Nyamira", "Nairobi"
-]
-active_counties_in_filter = deduplicated_filtered_df['County'].unique().tolist()
-relevant_all_counties = [c for c in all_counties_47 if c in selected_counties]
-no_submission_counties = [c for c in relevant_all_counties if c not in active_counties_in_filter]
-
-if no_submission_counties:
-    st.error(f"🚫 No unique submissions from: {', '.join(sorted(no_submission_counties))} ({len(no_submission_counties)} total)")
-else:
-    if selected_counties:
-        st.success("✅ All selected counties have unique submissions.")
-    else:
-        st.info("No counties selected.")
 
 # -------------------- FULL ROWS DISPLAY --------------------
 st.subheader("🧾 Full Filtered Rows (With Global Duplicate Tags)")
