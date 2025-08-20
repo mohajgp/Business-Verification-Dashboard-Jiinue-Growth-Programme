@@ -16,14 +16,39 @@ st.caption(f"Real-time view of business verifications by field officers - Stats 
 # -------------------- SETTINGS --------------------
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
 
-# -------------------- PHONE CLEANING FUNCTION --------------------
+# -------------------- NORMALIZATION HELPERS --------------------
+def normalize_id(val):
+    if pd.isna(val):
+        return ""
+    return (
+        str(val)
+        .upper()
+        .replace(" ", "")
+        .replace("\u00a0", "")   # non-breaking space
+        .replace("\u200b", "")   # zero-width space
+        .replace("\t", "")       # tabs
+        .strip()
+    )
+
 def clean_phone(phone):
-    phone = str(phone).strip().replace(" ", "").replace("+", "").replace("-", "")
-    if phone.startswith("0"):
+    phone = str(phone)
+    phone = (
+        phone.replace(" ", "")
+        .replace("+", "")
+        .replace("-", "")
+        .replace("\u00a0", "")
+        .replace("\u200b", "")
+        .strip()
+    )
+
+    if phone.startswith("0") and len(phone) == 10:
         return "254" + phone[1:]
     elif phone.startswith("7") and len(phone) == 9:
         return "254" + phone
-    return phone
+    elif phone.startswith("254") and len(phone) == 12:
+        return phone
+    else:
+        return phone
 
 # -------------------- LOAD DATA --------------------
 @st.cache_data(ttl=300)
@@ -32,13 +57,19 @@ def load_data(url):
         df = pd.read_csv(url)
         if df.empty:
             return pd.DataFrame()
+
         df.columns = df.columns.str.strip()
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
         df.dropna(subset=['Timestamp'], inplace=True)
+
         df['County'] = df['County'].astype(str).str.strip().str.title()
-        df['Verified ID Number'] = df['Verified ID Number'].astype(str).str.strip().str.upper()
-        df['Verified Phone Number'] = df['Verified Phone Number'].astype(str).apply(clean_phone)
-        df['Is Duplicate (Global)'] = df.duplicated(subset=['Verified ID Number', 'Verified Phone Number'], keep='first')
+        df['Verified ID Number'] = df['Verified ID Number'].apply(normalize_id)
+        df['Verified Phone Number'] = df['Verified Phone Number'].apply(clean_phone)
+
+        # Add duplicate marker
+        df['Is Duplicate (Global)'] = df.duplicated(
+            subset=['Verified ID Number', 'Verified Phone Number'], keep='first'
+        )
         return df
     except Exception as e:
         st.error(f"Error loading data: {e}")
@@ -49,6 +80,19 @@ df_raw = load_data(SHEET_CSV_URL)
 if df_raw.empty:
     st.warning("⚠️ No data loaded.")
     st.stop()
+
+# -------------------- DEBUG HIDDEN DUPES --------------------
+before_fix = df_raw.drop_duplicates(subset=['Verified ID Number','Verified Phone Number']).shape[0]
+
+# Re-run dedup with extra aggressive strip (double-check hidden diffs)
+df_debug = df_raw.copy()
+df_debug['ID_Debug'] = df_debug['Verified ID Number'].str.replace(r"\s+", "", regex=True)
+df_debug['Phone_Debug'] = df_debug['Verified Phone Number'].str.replace(r"\s+", "", regex=True)
+after_fix = df_debug.drop_duplicates(subset=['ID_Debug','Phone_Debug']).shape[0]
+
+hidden_diff = after_fix - before_fix
+if hidden_diff != 0:
+    st.warning(f"⚠️ {hidden_diff} extra duplicates were hidden due to invisible spaces/formatting.")
 
 # -------------------- GLOBAL METRICS (Sidebar) --------------------
 st.sidebar.markdown("### 📊 Global Summary (Before Filters)")
@@ -67,8 +111,12 @@ max_available_date = df_raw['Timestamp'].max().date()
 default_start_date = max(datetime(2025, 3, 1).date(), min_available_date)
 default_end_date = max_available_date
 
-date_range = st.sidebar.date_input("Select Date Range:", value=(default_start_date, default_end_date),
-                                   min_value=min_available_date, max_value=max_available_date)
+date_range = st.sidebar.date_input(
+    "Select Date Range:",
+    value=(default_start_date, default_end_date),
+    min_value=min_available_date,
+    max_value=max_available_date
+)
 
 if len(date_range) == 2:
     start_date, end_date = date_range
@@ -109,12 +157,11 @@ col3.metric("📍 Counties with Unique Submissions", filtered_counties_covered)
 col4.metric("📊 Avg Submissions/Day (Unique)",
             f"{unique_filtered_rows / ((end_date - start_date).days + 1):,.2f}" if (end_date - start_date).days >= 0 else "0.00")
 
-# -------------------- UNIQUE PER MONTH (PER-MONTH DEDUP) --------------------
-st.subheader("📅 Unique Submissions Per Month (Per-Month Deduplication)")
-filtered_df['Month'] = filtered_df['Timestamp'].dt.to_period('M')
+# -------------------- UNIQUE PER MONTH --------------------
+st.subheader("📅 Unique Submissions Per Month (Global Deduplication)")
+deduplicated_filtered_df['Month'] = deduplicated_filtered_df['Timestamp'].dt.to_period('M')
 monthly_uniques = (
-    filtered_df
-    .drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number', 'Month'])
+    deduplicated_filtered_df
     .groupby('Month')
     .size()
     .reset_index(name='Unique Submissions This Month')
@@ -126,14 +173,13 @@ if not monthly_uniques.empty:
     sum_of_monthly_uniques = monthly_uniques['Unique Submissions This Month'].sum()
     st.info(
         f"ℹ️ Sum of monthly uniques: **{sum_of_monthly_uniques:,}**, "
-        f"but global unique across all months is: **{global_unique:,}**."
+        f"while global unique across all months is: **{global_unique:,}**."
     )
 else:
     st.info("ℹ️ No monthly data for selected filters.")
 
 # -------------------- GLOBAL DEDUP → MONTHLY + COUNTY --------------------
 st.subheader("📊 Monthly & County Stats (Global Deduplication)")
-
 deduplicated_global_df = df_raw.drop_duplicates(
     subset=['Verified ID Number', 'Verified Phone Number'], keep='first'
 ).copy()
@@ -202,6 +248,3 @@ if not deduplicated_filtered_df.empty:
                        file_name=f"Unique_Filtered_{start_date}_{end_date}.csv", mime='text/csv')
 
 st.success(f"✅ Dashboard updated dynamically at {datetime.now().strftime('%B %d, %Y %H:%M:%S')}")
-
-
-
