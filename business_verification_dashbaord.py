@@ -4,13 +4,13 @@ import pandas as pd
 st.set_page_config(page_title="Deduplication Checker", page_icon="📑", layout="wide")
 st.title("📑 Business Verification Deduplication Checker")
 
-# Google Sheet link (converted to xlsx export)
+# Google Sheet (make sure it's shared as "Anyone with link")
 sheet_url = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
 
-# Load directly from URL
-df = pd.read_excel(sheet_url)
+# Force engine to avoid error
+df = pd.read_excel(sheet_url, engine="openpyxl")
 
-# --- Continue with your dedup logic ---
+# --- Dedup logic ---
 df = df.reset_index(drop=True)
 
 df_excel_style = df.drop_duplicates(
