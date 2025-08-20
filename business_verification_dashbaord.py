@@ -109,12 +109,12 @@ col3.metric("📍 Counties with Unique Submissions", filtered_counties_covered)
 col4.metric("📊 Avg Submissions/Day (Unique)",
             f"{unique_filtered_rows / ((end_date - start_date).days + 1):,.2f}" if (end_date - start_date).days >= 0 else "0.00")
 
-# -------------------- UNIQUE PER MONTH (GLOBAL-DEDUP MATCHING DOWNLOAD) --------------------
-st.subheader("📅 Unique Submissions Per Month (Global Deduplication – matches download)")
-
-deduplicated_filtered_df['Month'] = deduplicated_filtered_df['Timestamp'].dt.to_period('M')
+# -------------------- UNIQUE PER MONTH (PER-MONTH DEDUP) --------------------
+st.subheader("📅 Unique Submissions Per Month (Per-Month Deduplication)")
+filtered_df['Month'] = filtered_df['Timestamp'].dt.to_period('M')
 monthly_uniques = (
-    deduplicated_filtered_df
+    filtered_df
+    .drop_duplicates(subset=['Verified ID Number', 'Verified Phone Number', 'Month'])
     .groupby('Month')
     .size()
     .reset_index(name='Unique Submissions This Month')
@@ -125,8 +125,8 @@ if not monthly_uniques.empty:
     st.dataframe(monthly_uniques, use_container_width=True)
     sum_of_monthly_uniques = monthly_uniques['Unique Submissions This Month'].sum()
     st.info(
-        f"ℹ️ Sum of monthly uniques (filtered dedup): **{sum_of_monthly_uniques:,}**, "
-        f"and global unique across all data is: **{global_unique:,}**."
+        f"ℹ️ Sum of monthly uniques: **{sum_of_monthly_uniques:,}**, "
+        f"but global unique across all months is: **{global_unique:,}**."
     )
 else:
     st.info("ℹ️ No monthly data for selected filters.")
@@ -202,3 +202,6 @@ if not deduplicated_filtered_df.empty:
                        file_name=f"Unique_Filtered_{start_date}_{end_date}.csv", mime='text/csv')
 
 st.success(f"✅ Dashboard updated dynamically at {datetime.now().strftime('%B %d, %Y %H:%M:%S')}")
+
+
+
