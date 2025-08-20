@@ -34,7 +34,7 @@ def clean_phone(phone):
 @st.cache_data(ttl=300)
 def load_data():
     # replace this with your actual Google Sheet CSV export link
-    url = "https://docs.google.com/spreadsheets/d/1b_zSo-YNG47zEfAThmJBgEoypTq36IMT/export?format=csv"
+    url = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"
     df = pd.read_csv(url)
 
     # parse timestamp
