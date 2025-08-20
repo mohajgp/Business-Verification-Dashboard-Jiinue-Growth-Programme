@@ -14,7 +14,7 @@ st.set_page_config(
 st.title("📍 KNCCI Jiinue Business Verification Dashboard")
 
 # -------------------- GOOGLE SHEET LOADING --------------------
-SHEET_URL = "https://docs.google.com/spreadsheets/d/XXXXXXX/edit#gid=0"  # <-- replace with your sheet link
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1zsxFO4Gix-NqRRt-LQWf_TzlJcUtMbHdCOmstTOaP_Q/export?format=csv"  # <-- replace with your sheet link
 
 @st.cache_data(ttl=300)
 def load_data():
