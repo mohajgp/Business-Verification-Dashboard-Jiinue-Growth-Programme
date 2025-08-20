@@ -5,3 +5,4 @@ openlocationcode
 pyperclip
 python-docx
 gspread
+openpyxl
